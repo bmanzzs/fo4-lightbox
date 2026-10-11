@@ -2081,15 +2081,21 @@ for (const sec of foldable()) {
   if (chev) chev.outerHTML = UI_ICONS.chevron;
   h.addEventListener('click', (e) => { if (!e.target.closest('button, input')) sec.classList.toggle('closed'); });
 }
-$('showSideIcon').outerHTML = UI_ICONS.chevron;
-// the side panel's contents need SIDE_FIT px; a narrower panel draws them smaller (CSS zoom) instead of cutting them
-// off, down to SIDE_MIN; dragged past SIDE_SNAP it closes (the ‹ button at the view's edge opens it again)
-const SIDE_FIT = 300, SIDE_MIN = 140, SIDE_SNAP = 115;
+$('showSideIcon').outerHTML = UI_ICONS.chevronsRight;
+// The side panel's contents need SIDE_FIT px plus its scrollbar; a narrower panel draws them smaller (CSS zoom)
+// instead of cutting them off. Dragged narrower, it shrinks until every section fits its height exactly (nothing to
+// scroll, no empty space below); past that it closes (the tab at the view's edge opens it again).
+const SIDE_FIT = 300, SIDE_FLOOR = 90;
+function sideZoom(w) {
+  const side = $('side'), sb = side.offsetWidth - side.clientWidth;     // its scrollbar (none when all of it fits)
+  return w < SIDE_FIT + sb + 4 ? Math.max(0.2, (w - sb - 4) / SIDE_FIT) : 1;
+}
 function applyLayout() {
   const app = $('app');
-  ui.width = Math.max(SIDE_MIN, Math.min(620, Math.round(ui.width) || 340));
+  ui.width = Math.max(SIDE_FLOOR, Math.min(620, Math.round(ui.width) || 340));
   app.style.setProperty('--side-w', ui.width + 'px');
-  $('side').style.zoom = ui.width < SIDE_FIT ? (ui.width / SIDE_FIT).toFixed(3) : '';
+  const z = sideZoom(ui.width);
+  $('side').style.zoom = z < 1 ? z.toFixed(3) : '';
   app.classList.toggle('right', !!ui.right);
   app.classList.toggle('noside', !!ui.hidden);
   $('showSide').hidden = !ui.hidden;
@@ -2107,17 +2113,25 @@ function setLayout(name) {
 $('showSide').onclick = () => { ui.hidden = false; ui.layout = ui.width <= 300 ? 'compact' : 'studio'; applyLayout(); };
 // the sidebar edge drags
 $('splitter').addEventListener('pointerdown', (e) => {
-  const sp = $('splitter'); sp.setPointerCapture(e.pointerId); sp.classList.add('drag');
-  const box = $('app').getBoundingClientRect(), w0 = ui.width;
+  const sp = $('splitter'), app = $('app'), side = $('side');
+  sp.setPointerCapture(e.pointerId); sp.classList.add('drag');
+  const box = app.getBoundingClientRect(), w0 = ui.width;
+  // the narrowest: the zoom at which every section fits the panel's height exactly, measured at full size (set and
+  // put back in this one task: nothing is painted in between)
+  ui.width = SIDE_FIT + 4 + (side.offsetWidth - side.clientWidth); applyLayout();
+  const ratio = side.clientHeight / Math.max(1, side.scrollHeight);
+  const narrowest = Math.max(SIDE_FLOOR, Math.round(ratio < 1 ? SIDE_FIT * ratio : ui.width));
+  ui.width = w0; applyLayout();
   let raw = w0;
+  const closing = () => raw < narrowest - 8;                       // (a few pixels past the narrowest)
   sp.onpointermove = (ev) => {
     raw = ui.right ? box.right - ev.clientX : ev.clientX - box.left;
-    ui.width = raw; applyLayout();
-    sp.classList.toggle('snap', raw < SIDE_SNAP);               // (let go here: the panel closes)
+    ui.width = Math.max(narrowest, raw); applyLayout();
+    sp.classList.toggle('snap', closing()); app.classList.toggle('closing', closing());
   };
   sp.onpointerup = () => {
-    sp.onpointermove = null; sp.classList.remove('drag', 'snap');
-    if (raw < SIDE_SNAP) { ui.hidden = true; ui.width = Math.max(w0, SIDE_FIT); applyLayout(); }
+    sp.onpointermove = null; sp.classList.remove('drag', 'snap'); app.classList.remove('closing');
+    if (closing()) { ui.hidden = true; ui.width = Math.max(w0, SIDE_FIT); applyLayout(); }
   };
 });
 

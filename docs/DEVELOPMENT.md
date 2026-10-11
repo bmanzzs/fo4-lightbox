@@ -1255,3 +1255,9 @@ the default app to the user (Open with > Always use this app).
 - The side panel's contents need 300 px (measured: below it slider values were cut off). Narrower, down to 140 px,
   #side gets CSS zoom = width / 300, so everything shrinks instead; dragged past 115 px (the splitter lights up)
   it closes, keeping its last width for #showSide.
+- Second round (Bman): the fit counts the panel's scrollbar (sideZoom: width < 300 + scrollbar + 4), so nothing is cut
+  off with a scrollbar showing. The narrowest is no longer fixed: on each drag the panel measures, at full size, the
+  zoom at which every open section fits its height exactly (clientHeight / scrollHeight); it shrinks to that and
+  no further, and a few pixels past it the panel dims with "Let go to hide the panel" and the splitter glows. The
+  "Panels" button became a slim see-through tab with » at the view's edge. The game-hour clock lost its LCD box:
+  Pip-Boy green type, a shade darker, a thin dark outline.

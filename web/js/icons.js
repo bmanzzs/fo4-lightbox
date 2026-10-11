@@ -100,6 +100,7 @@ export const UI_ICONS = {
   eye: svg('<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>'),
   aperture: svg('<circle cx="12" cy="12" r="9"/><path d="M14.3 3.3L8.6 13.2M20.6 9.6H9.2M17.8 18.3L12.1 8.4M9.7 20.7l5.7-9.9M3.4 14.4h11.4M6.2 5.7l5.7 9.9"/>'),
   chevron: svg('<path d="M6 9l6 6 6-6"/>'),
+  chevronsRight: svg('<path d="M6 7l5 5-5 5M12 7l5 5-5 5"/>'),
   play: svg('<path d="M8 5.5l11 6.5-11 6.5z"/>'),
   // File menu
   camera: svg('<path d="M3.5 8.5a2 2 0 0 1 2-2h2.2l1.5-2.2h5.6l1.5 2.2h2.2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><circle cx="12" cy="13" r="3.6"/>'),

@@ -40,10 +40,22 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 #app.noside #side, #app.noside #splitter { display: none; }
 #splitter { position: absolute; top: 0; bottom: 0; left: var(--side-w, 340px); width: 7px; margin-left: -4px; cursor: col-resize; z-index: 20; }
 #app.right #splitter { left: auto; right: var(--side-w, 340px); margin: 0 -4px 0 0; }
-#splitter.snap { background: rgba(232,176,74,.35); }     /* let go here: the panel closes */
+/* dragged past the panel's narrowest: let go and it closes */
+#splitter.snap { background: var(--accent); box-shadow: 0 0 10px rgba(232,176,74,.6); }
+#sideHint { display: none; position: absolute; top: 45%; left: 0; width: var(--side-w, 340px); z-index: 21; text-align: center;
+  pointer-events: none; font-size: 12.5px; font-weight: 600; color: var(--accent); text-shadow: 0 1px 3px #000, 0 0 2px #000; }
+#app.right #sideHint { left: auto; right: 0; }
+#app.closing #sideHint { display: block; }
+#app.closing #side { opacity: .22; filter: grayscale(1); }
 #splitter:hover, #splitter.drag { background: linear-gradient(90deg, transparent 3px, rgba(232,176,74,.55) 3px, rgba(232,176,74,.55) 4px, transparent 4px); }
-#showSide { position: absolute; left: 10px; top: 10px; z-index: 6; display: flex; align-items: center; gap: 6px; font-size: 11.5px; background: rgba(26,29,34,.85); }
+#showSide { position: absolute; left: 0; top: 50%; transform: translateY(-50%); z-index: 6; width: 18px; height: 72px; padding: 0;
+  display: flex; align-items: center; justify-content: center; color: #aab2bd; background: rgba(26,29,34,.45);
+  border: 1px solid rgba(255,255,255,.1); border-left: 0; border-radius: 0 9px 9px 0; backdrop-filter: blur(3px);
+  transition: background .15s, color .15s, width .15s; }
+#showSide:hover { background: rgba(26,29,34,.88); color: var(--accent); width: 22px; }
 #showSide .ic { width: 14px; height: 14px; }
+#app.right #showSide { left: auto; right: 0; border: 1px solid rgba(255,255,255,.1); border-right: 0; border-radius: 9px 0 0 9px; }
+#app.right #showSide .ic { transform: rotate(180deg); }
 /* menu bar: slim, File / View / Help, the game folder dimmed on the right */
 #menubar { height: 27px; display: flex; align-items: center; gap: 1px; padding: 0 8px; background: #15181c; border-bottom: 1px solid var(--line);
   font-size: 12px; user-select: none; position: relative; z-index: 50; }
@@ -349,10 +361,8 @@ body.axes #viewinfo { left: calc(14px + 125px / var(--dpr, 1)); }
 .wstop.on .wtick { background: var(--accent); }
 .wstop.on .ic { transform: scale(1.12); filter: drop-shadow(0 0 4px rgba(232,176,74,.55)); }
 .pip { font-family: Monofonto, "Share Tech Mono", "Cascadia Mono", Consolas, ui-monospace, monospace; font-size: 15px; font-weight: 600;
-  letter-spacing: 1.5px; color: var(--pip); padding: 1px 9px; border-radius: 4px; border: 1px solid rgba(61,255,94,.28);
-  text-shadow: 0 0 4px rgba(61,255,94,.8), 0 0 11px rgba(61,255,94,.35);
-  background: repeating-linear-gradient(0deg, rgba(0,0,0,.32) 0 1px, transparent 1px 3px), radial-gradient(ellipse at 50% 40%, #0b2a12, #041007);
-  box-shadow: inset 0 0 9px rgba(61,255,94,.14); }
+  letter-spacing: 1.5px; color: #2fcc52; padding: 0 2px;
+  text-shadow: 0 0 1px rgba(0,0,0,.95), 0 1px 2px rgba(0,0,0,.85), 0 0 8px rgba(61,255,94,.28); }
 #hour { width: 100%; display: block; }
 #hour::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: linear-gradient(90deg, #172038 0%, #172038 20.8%,
   #b9684a 27%, #e2a467 31%, #79acd8 37.5%, #93c6ea 50%, #79acd8 70.8%, #e09a62 77%, #b25b43 81%, #172038 87.5%, #172038 100%); }
@@ -463,7 +473,7 @@ body.capture #baSplit, body.capture #baBar { display: none !important; }
 /* capture mode (tools/capture.py): the view alone, at the window's exact size */
 body.capture #app { grid-template-columns: 1fr; }
 body.capture #side, body.capture #toolbar, body.capture #hud, body.capture #toast, body.capture #keys, body.capture #menubar,
-body.capture #splitter, body.capture #showSide, body.capture #loadBar, body.capture #gizmo { display: none !important; }
+body.capture #splitter, body.capture #sideHint, body.capture #showSide, body.capture #loadBar, body.capture #gizmo { display: none !important; }
 body.capture #app { height: 100vh; }
 
 details { margin: 4px 0; }
@@ -706,11 +716,12 @@ body.capture #dataNote { display: none !important; }
     </section>
 
   </aside>
-  <div id="splitter" title="Drag to resize the sidebar"></div>
+  <div id="splitter" title="Drag to resize the sidebar (past its narrowest, it closes)"></div>
+  <div id="sideHint">Let go to hide the panel</div>
   <main id="main">
     <canvas id="view"></canvas>
     <canvas id="gizmo"></canvas>
-    <button id="showSide" hidden title="Show the sidebar again (View > Layout)"><span id="showSideIcon"></span>Panels</button>
+    <button id="showSide" hidden title="Show the panel"><span id="showSideIcon"></span></button>
     <div id="toolbar">
       <button data-cam="front">Front</button><button data-cam="back">Back</button><button data-cam="left">Left</button>
       <button data-cam="right">Right</button><button data-cam="three">¾ back</button><button data-cam="top">Top</button>

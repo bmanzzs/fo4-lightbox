@@ -1245,3 +1245,13 @@ the default app to the user (Open with > Always use this app).
 - The Scene list: a ▸ before each .nif row opens small rows for its shapes (an eye each, the triangle count; a
   click on the name selects the shape). An Alt+clicked shape opens its .nif's rows and lights its own.
 - Showing or hiding a shape bumps geomVersion as well as version, so the character's shadow maps follow.
+
+## Menu, outline and panel touches (2026-10-10)
+
+- The right-click menu has Reset (as the Scene row's ↺; greyed out unless the model was moved, turned or scaled).
+- An Alt+clicked shape: its .nif keeps the usual outline, the shape is drawn last in a lighter, stronger green
+  (selectionDraws marks it hi).
+- The browser's own right-click menu is off everywhere but text fields.
+- The side panel's contents need 300 px (measured: below it slider values were cut off). Narrower, down to 140 px,
+  #side gets CSS zoom = width / 300, so everything shrinks instead; dragged past 115 px (the splitter lights up)
+  it closes, keeping its last width for #showSide.

@@ -3187,9 +3187,11 @@ export class Renderer {
     if (sel.kind === 'model') {
       if (!sel.model.visible) return out;
       for (const s of sel.model.shapes) if (s.visible && s.mat.kind !== 'none' && s._ib) out.push([s, this.playerWorld(s)]);
-    } else if (sel.kind === 'shape') {                 // one shape of a model (Alt+click, the Scene list's shape rows)
+    } else if (sel.kind === 'shape') {                 // one shape of a model (Alt+click, the Scene list's shape rows):
+      if (!sel.model.visible) return out;              // its .nif outlined as usual, the shape lighter on top (hi)
+      for (const s of sel.model.shapes) if (s !== sel.shape && s.visible && s.mat.kind !== 'none' && s._ib) out.push([s, this.playerWorld(s)]);
       const s = sel.shape;
-      if (sel.model.visible && s.visible && s.mat.kind !== 'none' && s._ib) out.push([s, this.playerWorld(s)]);
+      if (s.visible && s.mat.kind !== 'none' && s._ib) out.push([s, this.playerWorld(s), true]);
     } else {
       for (const s of sel.tpl.shapes) {
         const it = s._batch && s._batch.inst[sel.index];
@@ -3228,16 +3230,16 @@ export class Renderer {
     if (!this.progs.wire) this.progs.wire = [0, 1].map(sk => this.program(S.MESH_VS, S.WIRE_FS, `wire${sk}`, { SKINNED: sk, CLIP: 0 }, { uSceneDepth: 6 }));
     const ib = this.inst.wire || (this.inst.wire = this.instBuffer());
     ib.n = 0;
-    const items = list.map(([s, W]) => [s, this.pushInst(ib, W)]);
+    const items = list.map(([s, W, hi]) => [s, this.pushInst(ib, W), hi]);
     this.uploadInst(ib);
     gl.viewport(0, 0, w, h);
     this.setDepthTest(false); this.setCull(false); this.setBlend(true, gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     this.bindUnit(6, this.sceneDepth);
-    for (const [s, base] of items) {
+    for (const [s, base, hi] of items) {
       this.buildWire(s);
       const p = this.progs.wire[s.skinData ? 1 : 0];
       this.useProg(p);
-      this.u4f(p, 'uColor', [0.45, 1.0, 0.56, 0.22]);
+      this.u4f(p, 'uColor', hi ? [0.8, 1.0, 0.84, 0.6] : [0.45, 1.0, 0.56, 0.22]);   // (hi: an Alt+clicked shape)
       if (s.skinData) this.bindBones(s.skinData);
       gl.bindVertexArray(s.vao); this._vao = s.vao;
       if (s.consts) for (const c of s.consts) this.constAttrib(c);

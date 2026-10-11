@@ -110,7 +110,7 @@ Version 1.1.0 · Windows 10 / 11 · GPL-3.0 · no F4SE · nothing goes into your
 - `tools\capture.py` renders a model or an armour record to PNGs without opening a window, for scripted reviews.
 - Single shapes: Alt+click one in the view, or open a .nif's shapes with the ▸ in the Scene list (small rows, an
   eye each).
-- Right-click a model in the view: Hide .nif or Delete .nif (out of the scene; the file is never touched).
+- Right-click a model in the view: Hide .nif, Reset (undo the gizmo) or Delete .nif (out of the scene; the file is never touched).
 - Open .nif files from Explorer: File > Open .nif files with Lightbox adds it to Windows' Open with list (tick
   "Always use this app" once for double-clicks). An open window takes the file and comes to the front.
 - Even light (the bulb in the World panel): one light from the camera and flat ambient, like NifSkope and Outfit

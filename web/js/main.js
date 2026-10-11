@@ -1379,9 +1379,9 @@ function openCtxMenu(x, y) {
   head.className = 'ctxname';
   head.textContent = (body ? 'Reference body' : m.name.split('\\').pop()) + (s.kind === 'shape' ? ` › ${s.shape.name}` : '');
   ctx.append(head);
-  const item = (label, title, fn) => {
+  const item = (label, title, fn, enabled = true) => {
     const b = document.createElement('button');
-    b.textContent = label; b.title = title;
+    b.textContent = label; b.title = title; b.disabled = !enabled;
     b.onclick = () => { closeCtxMenu(); fn(); };
     ctx.append(b);
   };
@@ -1395,6 +1395,10 @@ function openCtxMenu(x, y) {
     for (const x of list) x.visible = false;
     R.setSelection(null); refreshModels(); R.version++;
   });
+  item('Reset', 'Undo the move, turn and scale (the gizmo): back where the file puts it', () => {
+    for (const x of list) R.setModelXform(x, null);
+    refreshModels();
+  }, list.some(x => x.xf));
   item(body ? 'Delete body' : 'Delete .nif', 'Take it out of the scene (the file itself is not touched)', () => {
     R.setSelection(null);
     if (body) { setRef('', ''); return; }
@@ -1407,6 +1411,11 @@ function openCtxMenu(x, y) {
 window.addEventListener('pointerdown', e => { if (!ctx.hidden && !ctx.contains(e.target)) closeCtxMenu(); }, true);
 window.addEventListener('keydown', e => { if (e.key === 'Escape') closeCtxMenu(); });
 window.addEventListener('blur', closeCtxMenu);
+// the browser's own right-click menu (Open image in new tab, Inspect...) is not Lightbox's: off, except in text
+// fields (copy, paste)
+document.addEventListener('contextmenu', (e) => {
+  if (!e.target.closest('input, textarea, [contenteditable="true"]')) e.preventDefault();
+});
 cv.addEventListener('wheel', closeCtxMenu, { passive: true });
 cv.addEventListener('pointerup', () => drag = null);
 cv.addEventListener('pointermove', e => {
@@ -2073,10 +2082,14 @@ for (const sec of foldable()) {
   h.addEventListener('click', (e) => { if (!e.target.closest('button, input')) sec.classList.toggle('closed'); });
 }
 $('showSideIcon').outerHTML = UI_ICONS.chevron;
+// the side panel's contents need SIDE_FIT px; a narrower panel draws them smaller (CSS zoom) instead of cutting them
+// off, down to SIDE_MIN; dragged past SIDE_SNAP it closes (the ‹ button at the view's edge opens it again)
+const SIDE_FIT = 300, SIDE_MIN = 140, SIDE_SNAP = 115;
 function applyLayout() {
   const app = $('app');
-  ui.width = Math.max(260, Math.min(620, Math.round(ui.width) || 340));
+  ui.width = Math.max(SIDE_MIN, Math.min(620, Math.round(ui.width) || 340));
   app.style.setProperty('--side-w', ui.width + 'px');
+  $('side').style.zoom = ui.width < SIDE_FIT ? (ui.width / SIDE_FIT).toFixed(3) : '';
   app.classList.toggle('right', !!ui.right);
   app.classList.toggle('noside', !!ui.hidden);
   $('showSide').hidden = !ui.hidden;
@@ -2095,9 +2108,17 @@ $('showSide').onclick = () => { ui.hidden = false; ui.layout = ui.width <= 300 ?
 // the sidebar edge drags
 $('splitter').addEventListener('pointerdown', (e) => {
   const sp = $('splitter'); sp.setPointerCapture(e.pointerId); sp.classList.add('drag');
-  const box = $('app').getBoundingClientRect();
-  sp.onpointermove = (ev) => { ui.width = ui.right ? box.right - ev.clientX : ev.clientX - box.left; applyLayout(); };
-  sp.onpointerup = () => { sp.onpointermove = null; sp.classList.remove('drag'); };
+  const box = $('app').getBoundingClientRect(), w0 = ui.width;
+  let raw = w0;
+  sp.onpointermove = (ev) => {
+    raw = ui.right ? box.right - ev.clientX : ev.clientX - box.left;
+    ui.width = raw; applyLayout();
+    sp.classList.toggle('snap', raw < SIDE_SNAP);               // (let go here: the panel closes)
+  };
+  sp.onpointerup = () => {
+    sp.onpointermove = null; sp.classList.remove('drag', 'snap');
+    if (raw < SIDE_SNAP) { ui.hidden = true; ui.width = Math.max(w0, SIDE_FIT); applyLayout(); }
+  };
 });
 
 // settings: what the panels are set to (not the loaded models)

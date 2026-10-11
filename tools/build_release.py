@@ -1,6 +1,6 @@
 """Build the FO4 Lightbox release zips.
 
-    python tools/build_release.py [--out DIR] [--no-runtime] [--keep-stage]
+    python tools/build_release.py [--out DIR] [--no-runtime] [--keep-stage] [--extract-to DIR]
 
 1. Runs tools/check_clean.py on the project (it must pass).
 2. Copies the files that ship (INCLUDE) to DIR/stage/FO4 Lightbox/. Anything else in the project is listed as not
@@ -329,6 +329,8 @@ def main():
     ap.add_argument('--no-runtime', action='store_true', help='only the zip without Python')
     ap.add_argument('--keep-stage', action='store_true', help='keep DIR/stage after zipping (for testing)')
     ap.add_argument('--no-launcher', action='store_true', help='leave out FO4 Lightbox.exe (no C# compiler here)')
+    ap.add_argument('--extract-to', metavar='DIR', help='also unpack the zip with Python to DIR (DIR/FO4 Lightbox, '
+                    'replacing the copy from the last build): a fixed folder for a shortcut to the newest build')
     a = ap.parse_args()
     out = os.path.abspath(a.out)
     if os.path.commonpath([out, ROOT]) == ROOT:
@@ -375,7 +377,29 @@ def main():
         f.write('\n'.join(sums) + '\n')
     if not a.keep_stage:
         shutil.rmtree(os.path.dirname(stage))
+    if a.extract_to:
+        extract_build(zips[0][0], a.extract_to)
     print('done:', out)
+
+
+def extract_build(zip_path, dest):
+    """Unpack the newest build over DIR's copy of the last one (DIR/FO4 Lightbox), so one shortcut always starts the
+    newest build. The old copy is first renamed aside: Windows refuses while any of its files is open, so a copy that
+    is running is left as it is (no half-updated folder) and the build says so."""
+    app = os.path.join(dest, 'FO4 Lightbox')
+    if os.path.isdir(app):
+        old = app + '.old'
+        shutil.rmtree(old, ignore_errors=True)
+        try:
+            os.rename(app, old)
+        except OSError:
+            print(f'  NOT unpacked to {app}: that copy is running (close FO4 Lightbox, then build again)')
+            return
+        shutil.rmtree(old, ignore_errors=True)
+    os.makedirs(dest, exist_ok=True)
+    with zipfile.ZipFile(zip_path) as z:
+        z.extractall(dest)
+    print(f'  unpacked to {app}')
 
 
 if __name__ == '__main__':

@@ -1210,3 +1210,17 @@ set each frame from the eye), the same grey ambient on all six ambient rows, no 
 shafts (no godRays), no fog, LUTs or tint, and a fixed exposure (aeMin = aeMax). Materials draw as always. It works on
 its own or with the black / grey backdrops; in cells the placed lights still add their light. Saved with the World
 settings (world.evenLight).
+
+## Open with: .nif files from Explorer (2026-10-10)
+
+FO4 Lightbox.exe takes a .nif path (a double-click, Windows' Open with). The launcher hands it to the server
+(/api/open) and, when a page asked lately (/api/opens, about once a second, with its title), restores and brings
+that window to the front by its title (Edge / Chrome app windows carry the page title) instead of opening a second
+one; otherwise it starts the viewer as usual and the new page takes the file once started (items of the last 2
+minutes). The page puts the file in place of the loaded models (the body and what it wears stay):
+- a file the game sees at its own game path (loose in Data or in a Mod Organizer 2 mod: open_target checks that
+  the VFS resolves that path to this very file) opens by that path, with its materials and textures;
+- any other file (an export folder) is read like a dropped file (/api/openfile), textures from the game.
+File > Open .nif files with Lightbox (open_with) adds or removes HKCU\Software\Classes entries: the ProgID
+FO4Lightbox.nif, .nif\OpenWithProgids and Applications\FO4 Lightbox.exe (this user, no admin). Windows leaves
+the default app to the user (Open with > Always use this app).

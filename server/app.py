@@ -670,6 +670,86 @@ def hkx_list():
     return _listing('hkx_list', ('.hkx',))
 
 
+
+# ------------------------------------------------------------------------------------------------ Open with
+# FO4 Lightbox.exe <file.nif> (a double-click on a .nif, Windows' Open with) hands the file to the viewer: /api/open
+# queues it, the open page asks /api/opens about once a second and loads it. A file the game sees at its own game path
+# (loose in Data or in a Mod Organizer 2 mod) opens by that path, with its materials and textures as for any game
+# mesh; any other file (an export folder) is read like a dropped file (/api/openfile), its textures from the game.
+OPENS = {'lock': threading.Lock(), 'next': 1, 'items': [], 'files': {}, 'seen': -1e9, 'title': ''}
+APP_DIR = os.path.dirname(HERE)
+
+
+def open_target(path):
+    """The game path of a file when the game sees exactly this file there, else None."""
+    p = os.path.normcase(os.path.abspath(path))
+    parts = p.split(os.sep)
+    for i in range(len(parts) - 1, -1, -1):
+        if parts[i] == 'meshes':
+            rel = '\\'.join(parts[i:])
+            try:
+                lp = State.vfs.loose_path(norm(rel))
+            except Exception:
+                lp = None
+            if lp and os.path.normcase(os.path.abspath(lp)) == p:
+                return rel
+            break
+    return None
+
+
+def open_with(on):
+    """Windows' Open with list for .nif files, for this user (no admin rights): FO4 Lightbox.exe "<file>". Windows
+    leaves the default app to the user (Open with > Always use this app), so NifSkope or any default stays as it is."""
+    import winreg
+    import ctypes
+    exe = os.path.normpath(os.path.join(APP_DIR, 'FO4 Lightbox.exe'))
+    cls = r'Software\Classes'
+    keys = [cls + r'\FO4Lightbox.nif\shell\open\command', cls + r'\FO4Lightbox.nif\shell\open',
+            cls + r'\FO4Lightbox.nif\shell', cls + r'\FO4Lightbox.nif\DefaultIcon', cls + r'\FO4Lightbox.nif',
+            cls + r'\Applications\FO4 Lightbox.exe\shell\open\command', cls + r'\Applications\FO4 Lightbox.exe\shell\open',
+            cls + r'\Applications\FO4 Lightbox.exe\shell', cls + r'\Applications\FO4 Lightbox.exe\SupportedTypes',
+            cls + r'\Applications\FO4 Lightbox.exe']
+    H = winreg.HKEY_CURRENT_USER
+    if on:
+        if not os.path.isfile(exe):
+            raise FileNotFoundError('FO4 Lightbox.exe is not next to the viewer (running from the source folder?)')
+        cmd = f'"{exe}" "%1"'
+
+        def put(key, name, value, kind=winreg.REG_SZ):
+            with winreg.CreateKeyEx(H, key, 0, winreg.KEY_WRITE) as k:
+                winreg.SetValueEx(k, name, 0, kind, value)
+        put(cls + r'\FO4Lightbox.nif', '', 'NIF mesh')
+        put(cls + r'\FO4Lightbox.nif\DefaultIcon', '', f'"{exe}",0')
+        put(cls + r'\FO4Lightbox.nif\shell\open\command', '', cmd)
+        put(cls + r'\.nif\OpenWithProgids', 'FO4Lightbox.nif', b'', winreg.REG_NONE)
+        put(cls + r'\Applications\FO4 Lightbox.exe', 'FriendlyAppName', 'FO4 Lightbox')
+        put(cls + r'\Applications\FO4 Lightbox.exe\shell\open\command', '', cmd)
+        put(cls + r'\Applications\FO4 Lightbox.exe\SupportedTypes', '.nif', '')
+    else:
+        try:
+            with winreg.OpenKey(H, cls + r'\.nif\OpenWithProgids', 0, winreg.KEY_SET_VALUE) as k:
+                winreg.DeleteValue(k, 'FO4Lightbox.nif')
+        except OSError:
+            pass
+        for key in keys:                         # (deepest first)
+            try:
+                winreg.DeleteKey(H, key)
+            except OSError:
+                pass
+    ctypes.windll.shell32.SHChangeNotify(0x08000000, 0, None, None)      # SHCNE_ASSOCCHANGED: Explorer reads it again
+    return open_with_state()
+
+
+def open_with_state():
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r'Software\Classes\FO4Lightbox.nif\shell\open\command') as k:
+            cmd = winreg.QueryValueEx(k, '')[0]
+        return dict(on=True, command=cmd)
+    except (OSError, ImportError):
+        return dict(on=False, exe=os.path.isfile(os.path.join(APP_DIR, 'FO4 Lightbox.exe')))
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
 
@@ -831,6 +911,39 @@ class Handler(BaseHTTPRequestHandler):
 
     def api(self, ep, q):
         vfs = State.vfs
+        if ep == 'open':                                # FO4 Lightbox.exe <file.nif>: hand a file to the viewer
+            fp = os.path.abspath(q.get('path', ''))
+            if not fp.lower().endswith('.nif') or not os.path.isfile(fp):
+                return self.error(404, f'not a NIF file: {fp}')
+            rel = open_target(fp)
+            with OPENS['lock']:
+                item = dict(id=OPENS['next'], name=os.path.basename(fp), rel=rel, t=time.monotonic())
+                OPENS['next'] += 1
+                OPENS['items'] = OPENS['items'][-19:] + [item]
+                OPENS['files'][item['id']] = fp
+            # page: an open page asked lately (a minimised one asks about once a minute); title: its window's title
+            return self.send(200, dict(id=item['id'], rel=rel, page=time.monotonic() - OPENS['seen'] < 75,
+                                       title=OPENS['title']))
+        if ep == 'opens':                               # the page: files handed over since `after` (0: the last 2 min, a page still starting)
+            OPENS['seen'] = time.monotonic()
+            OPENS['title'] = q.get('title', '')[:300]
+            after, now = int(q.get('after') or 0), time.monotonic()
+            items = [dict(id=i['id'], name=i['name'], rel=i['rel']) for i in OPENS['items']
+                     if i['id'] > after and (after or now - i['t'] < 120)]
+            return self.send(200, dict(items=items))
+        if ep == 'openfile':                            # a handed-over file outside the game's folders, as bytes
+            fp = OPENS['files'].get(int(q.get('id') or 0))
+            if not fp or not os.path.isfile(fp):
+                return self.error(404, 'that file is no longer there')
+            with open(fp, 'rb') as f:
+                return self.send(200, f.read(), 'application/octet-stream')
+        if ep == 'openwith':                            # File > Open .nif files with Lightbox (Windows' Open with)
+            if 'set' not in q:
+                return self.send(200, open_with_state())
+            try:
+                return self.send(200, open_with(q['set'] == '1'))
+            except Exception as e:
+                return self.error(500, str(e))
         if ep == 'version':
             return self.send(200, dict(boot=BOOT, web=web_stamp(), data=data_generation(), paused=State.paused))
         if ep == 'ready':                               # FO4 Lightbox.exe's splash: what has finished loading

@@ -108,6 +108,8 @@ Version 1.1.0 · Windows 10 / 11 · GPL-3.0 · no F4SE · nothing goes into your
 - Compare panel: drop an in-game screenshot over the view (onion skin, difference, split) and sample both.
 - Studio, Compact and Viewport layouts. Settings are kept in your browser and can be saved to a file.
 - `tools\capture.py` renders a model or an armour record to PNGs without opening a window, for scripted reviews.
+- Open .nif files from Explorer: File > Open .nif files with Lightbox adds it to Windows' Open with list (tick
+  "Always use this app" once for double-clicks). An open window takes the file and comes to the front.
 - Even light (the bulb in the World panel): one light from the camera and flat ambient, like NifSkope and Outfit
   Studio, so every part is lit wherever you look.
 - A still scene uses no GPU. View > Quality (Auto by default) keeps weaker PCs usable: laptop graphics and 2-4 GB

@@ -110,12 +110,16 @@ static class Launcher
         List<string> pass = new List<string>();
         int port = 8765;
         bool chooseGame = false;
-        string game = null;
+        string game = null, openFile = null;
+        bool handed = false;
         for (int i = 0; i < args.Length; i++)
         {
             if (args[i] == "--port" && i + 1 < args.Length) { int.TryParse(args[++i], out port); continue; }
             if (args[i] == "--choose-game") { chooseGame = true; continue; }
             if (args[i] == "--game" && i + 1 < args.Length) { game = args[++i]; continue; }
+            // a .nif given to the exe (a double-click, Windows' Open with): handed to the viewer once it is up
+            if (args[i].EndsWith(".nif", StringComparison.OrdinalIgnoreCase) && File.Exists(args[i]))
+            { openFile = Path.GetFullPath(args[i]); continue; }
             pass.Add(args[i]);
         }
         if (game == null && !chooseGame) game = SavedGame();
@@ -123,7 +127,21 @@ static class Launcher
         ui.Set(0.03, "Starting…");
         Process server = null;
         if (IsLightbox(port))
+        {
             ui.Set(0.85, "Joining the viewer that is already running…");
+            // a file for a viewer whose window is open: that window loads it and comes to the front
+            if (openFile != null)
+            {
+                string title;
+                handed = true;
+                if (HandOver(port, openFile, out title) && Activate(title))
+                {
+                    ui.Set(1, "Opened in the viewer");
+                    ui.Done();
+                    return 0;
+                }
+            }
+        }
         else
         {
             if (!PortFree(port)) port = FreePort(port + 1);
@@ -156,6 +174,8 @@ static class Launcher
         }
 
         string url = "http://127.0.0.1:" + port + "/";
+        string ignored;
+        if (openFile != null && !handed) HandOver(port, openFile, out ignored);   // the window about to open loads it once started
         ui.Set(0.95, "Opening the viewer…");
         Process window = OpenWindow(url);
         if (window == null)
@@ -330,6 +350,46 @@ static class Launcher
         }
         catch (Exception) { return null; }
     }
+
+    // ------------------------------------------------------------------------------------------- Open with
+    // the file goes to the server's queue (/api/open); true when a page asked lately (title: its window's title)
+    static bool HandOver(int port, string file, out string title)
+    {
+        title = null;
+        string r = Get(port, "/api/open?path=" + Uri.EscapeDataString(file));
+        if (r == null) return false;
+        Match t = Regex.Match(r, "\"title\":\"((?:[^\"\\\\]|\\\\.)*)\"");
+        if (t.Success) title = Regex.Unescape(t.Groups[1].Value);
+        return r.Contains("\"page\":true");
+    }
+
+    // the viewer's window (Edge / Chrome in app mode: its title is the page's) restored and brought to the front
+    static bool Activate(string title)
+    {
+        if (string.IsNullOrEmpty(title)) return false;
+        IntPtr found = IntPtr.Zero;
+        EnumWindows((h, l) =>
+        {
+            if (!IsWindowVisible(h)) return true;
+            StringBuilder sb = new StringBuilder(512);
+            GetWindowText(h, sb, sb.Capacity);
+            string w = sb.ToString();
+            if (w == title || w.StartsWith(title + " - ")) { found = h; return false; }
+            return true;
+        }, IntPtr.Zero);
+        if (found == IntPtr.Zero) return false;
+        if (IsIconic(found)) ShowWindow(found, 9);            // SW_RESTORE
+        SetForegroundWindow(found);
+        return true;
+    }
+
+    delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+    [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lParam);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hWnd);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr hWnd, StringBuilder s, int n);
+    [DllImport("user32.dll")] static extern bool IsIconic(IntPtr hWnd);
+    [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr hWnd, int cmd);
+    [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hWnd);
 
     static bool IsLightbox(int port)
     {

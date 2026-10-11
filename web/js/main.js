@@ -2156,6 +2156,7 @@ function syncMenu() {
 function menuAction(act, v) {
   if (act === 'import') $('refFileInput').click();
   else if (act === 'screenshot') $('shot').click();
+  else if (act === 'openWith') toggleOpenWith();
   else if (act === 'saveSettings') saveSettingsFile();
   else if (act === 'loadSettings') $('settingsInput').click();
   else if (act === 'resetSettings') resetSettings();
@@ -2394,5 +2395,47 @@ function gameCamera({ x, y, z, pitch = 0, heading = 0, fov = 80, eye = 120 }) {
 window.lightboxDev = { openPlace: async (k) => { await openPlace(PLACES.find(p => p.key === k)); await cells.lodDone; },
   setLighting, setRef, setHour, loadNif, playPose, openCell: async (c, k) => { await openCell(c, k); await cells.lodDone; },
   findCell: (edid) => findCell(api, edid), unloadCell: () => cells.unload(), state, cells, game, gameCamera };
-init().catch(e => log(e.message, true));
+// ------------------------------------------------------------------------------------------------ Open with
+// FO4 Lightbox.exe <file.nif> (a double-click on a .nif, Windows' Open with) hands the file over through the server:
+// a game path (the game sees exactly this file: materials and textures as for any game mesh) or, for a file anywhere
+// else, its bytes (read like a dropped file). The page asks about once a second; the window's title tells the
+// launcher which window to bring to the front.
+let openAfter = 0, openTimer = 0;
+async function pollOpens() {
+  clearTimeout(openTimer);
+  try {
+    const r = await fetch(`/api/opens?after=${openAfter}&title=${encodeURIComponent(document.title)}`).then(x => x.json());
+    for (const it of r.items || []) {
+      openAfter = Math.max(openAfter, it.id);
+      // like opening a file in NifSkope: it takes the place of the loaded models (the body and what it wears stay)
+      for (const m of R.models.filter(x => x.role === 'main')) R.removeModel(m);
+      refreshModels();
+      if (it.rel) await loadNif(it.rel, 'main');
+      else {
+        const x = await fetch('/api/openfile?id=' + it.id);
+        if (!x.ok) { toast(`${it.name}: could not be read`, 5000); continue; }
+        const buf = await x.arrayBuffer();
+        await importNif({ name: it.name, arrayBuffer: async () => buf }, 'main');
+      }
+    }
+  } catch (e) { /* the server is restarting: next time */ }
+  openTimer = setTimeout(pollOpens, 1000);
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) pollOpens(); });
+// File > Open .nif files with Lightbox: adds it to Windows' Open with list (this user, no admin rights), or takes it out
+async function toggleOpenWith() {
+  try {
+    const s = await api('openwith');
+    if (s.on) {
+      if (!confirm('Take FO4 Lightbox out of the Open with list for .nif files?')) return;
+      await api('openwith?set=0');
+      toast('FO4 Lightbox is no longer in the Open with list for .nif files');
+    } else {
+      await api('openwith?set=1');
+      toast('Done: right-click a .nif > Open with > FO4 Lightbox. To open .nif files with a double-click, choose it once ' +
+        'with "Always use this app" ticked (Windows leaves the default to you)', 12000);
+    }
+  } catch (e) { toast('Open with: ' + e.message, 8000); }
+}
+init().catch(e => log(e.message, true)).finally(pollOpens);
 requestAnimationFrame(loop);

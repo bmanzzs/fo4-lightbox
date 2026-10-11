@@ -459,6 +459,28 @@ function resetXform(list) {
   b.onclick = () => { for (const m of list) R.setModelXform(m, null); refreshModels(); };
   return [b];
 }
+// a model's shapes as small rows under its own (the Scene list's ▸): an eye each, a click on the name selects that shape
+const expanded = new WeakSet();
+function setShapeVisible(s, v) { s.visible = v; R.geomVersion++; R.version++; }
+function shapeRows(el, m) {
+  for (const s of m.shapes) {
+    const d = document.createElement('div');
+    d.className = 'm sh' + (R.selection?.kind === 'shape' && R.selection.shape === s ? ' sel' : '');
+    const cb = eyeToggle(d, () => s.visible, (v) => setShapeVisible(s, v));
+    const n = document.createElement('span'); n.className = 'n'; n.textContent = s.name || '(unnamed shape)';
+    n.title = `${s.name} · ${s.ntris} tris · ${s.mat.material_path || '(NIF shader)'}\nclick: select this shape (Alt+click in the view does the same)`;
+    n.onclick = () => { R.setSelection({ kind: 'shape', model: m, shape: s }); refreshModels(); };
+    const t = document.createElement('span'); t.className = 'tris'; t.textContent = s.ntris;
+    d.append(cb, n, t); el.append(d);
+  }
+}
+function shapeTwisty(m) {
+  const b = document.createElement('button'); b.className = 'tw';
+  b.textContent = expanded.has(m) ? '▾' : '▸';
+  b.title = expanded.has(m) ? 'Hide its shapes' : `Show its ${m.shapes.length} shapes`;
+  b.onclick = () => { if (expanded.has(m)) expanded.delete(m); else expanded.add(m); refreshModels(); };
+  return b;
+}
 function refreshModels() {
   updateTitle();
   showClothUI();
@@ -490,7 +512,10 @@ function refreshModels() {
     else if (m.mod) tag.title = `loose file from the Mod Organizer 2 mod "${m.mod}"`;
     const x = document.createElement('button'); x.className = 'x'; x.innerHTML = UI_ICONS.close; x.title = 'Remove from the scene';
     x.onclick = () => { R.removeModel(m); state.refModels = state.refModels.filter(r => r !== m); refreshModels(); R.scheduleSweep(); };
+    d.prepend(shapeTwisty(m));
     d.append(cb, n, tag, ...resetXform([m]), x); el.append(d);
+    if (R.selection?.kind === 'shape' && R.selection.model === m) expanded.add(m);   // (an Alt+clicked shape shows its row)
+    if (expanded.has(m)) shapeRows(el, m);
   }
   refreshShapes();
   // one line per animated model (moving parts / material animations); the full controller list on hover
@@ -1330,7 +1355,11 @@ cv.addEventListener('pointerup', e => {
   if (!d || (d.button !== 0 && d.button !== 2) || e.shiftKey || Math.hypot(e.clientX - d.x0, e.clientY - d.y0) > 4 ||
       performance.now() - d.t0 > 450) return;
   const r = cv.getBoundingClientRect();
-  try { R.setSelection(R.pick(e.clientX - r.left, e.clientY - r.top)); } catch (err) { console.warn('pick:', err); }
+  try {
+    const hit = R.pick(e.clientX - r.left, e.clientY - r.top), was = R.selection?.kind;
+    R.setSelection(e.altKey && hit?.kind === 'model' && hit.shape ? { kind: 'shape', model: hit.model, shape: hit.shape } : hit);
+    if (R.selection?.kind === 'shape' || was === 'shape') refreshModels();       // the shape's row in the Scene list
+  } catch (err) { console.warn('pick:', err); }
   if (d.button === 2) openCtxMenu(e.clientX, e.clientY);
 });
 
@@ -1342,12 +1371,13 @@ const ctx = $('ctxMenu');
 function closeCtxMenu() { ctx.hidden = true; }
 function openCtxMenu(x, y) {
   const s = R.selection;
-  const list = !s || s.kind !== 'model' ? [] : s.model.refBody ? R.models.filter(m => m.refBody) : [s.model];
+  const list = !s || (s.kind !== 'model' && s.kind !== 'shape') ? [] : s.model.refBody ? R.models.filter(m => m.refBody) : [s.model];
   if (!list.length) { closeCtxMenu(); return; }
   const m = list[0], body = !!m.refBody;
   ctx.innerHTML = '';
   const head = document.createElement('div');
-  head.className = 'ctxname'; head.textContent = body ? 'Reference body' : m.name.split('\\').pop();
+  head.className = 'ctxname';
+  head.textContent = (body ? 'Reference body' : m.name.split('\\').pop()) + (s.kind === 'shape' ? ` › ${s.shape.name}` : '');
   ctx.append(head);
   const item = (label, title, fn) => {
     const b = document.createElement('button');
@@ -1355,6 +1385,12 @@ function openCtxMenu(x, y) {
     b.onclick = () => { closeCtxMenu(); fn(); };
     ctx.append(b);
   };
+  if (s.kind === 'shape') {
+    const shape = s.shape;
+    item('Hide shape', 'Hide this shape (its eye under the .nif in the Scene list shows it again)', () => {
+      setShapeVisible(shape, false); expanded.add(s.model); R.setSelection(null); refreshModels();
+    });
+  }
   item(body ? 'Hide body' : 'Hide .nif', 'Hide it (its eye in the Scene list shows it again)', () => {
     for (const x of list) x.visible = false;
     R.setSelection(null); refreshModels(); R.version++;
@@ -2002,6 +2038,7 @@ function loop(now) {
   if (drew) fps = fps * 0.9 + (1 / Math.max(dt, 1e-3)) * 0.1;
   const st = R.stats || {};
   const sel = R.selection, selName = !sel ? '' : sel.kind === 'model' ? sel.model.name.split('\\').pop()
+    : sel.kind === 'shape' ? `${sel.model.name.split('\\').pop()} › ${sel.shape.name}`
     : `${(sel.tpl.name || '').split('\\').pop()}${sel.tpl.items?.[sel.index]?.edid ? `  ${sel.tpl.items[sel.index].edid}` : ''}`;
   gizmo.enabled = !game.on;
   gizmo.draw();

@@ -1235,3 +1235,13 @@ the default app to the user (Open with > Always use this app).
   page could ask, and the launcher took that stop as the end. Now exit_when_idle does not count time this thread
   spent far past its tick (the PC was asleep), and the launcher starts the server again on the same port while its
   window is open (up to 5 times): the page sees a new boot, reloads and puts the scene back.
+
+## Single shapes (2026-10-10)
+
+- Alt+click (left or right) selects the one shape under the cursor: renderer.pick reports the shape it hit, the
+  selection is {kind: 'shape', model, shape}, selectionDraws outlines that shape alone, the HUD names it
+  (file › shape), the right-click menu adds Hide shape. The gizmo stays for whole models (it moves files, not
+  shapes). A plain click selects the whole .nif again.
+- The Scene list: a ▸ before each .nif row opens small rows for its shapes (an eye each, the triangle count; a
+  click on the name selects the shape). An Alt+clicked shape opens its .nif's rows and lights its own.
+- Showing or hiding a shape bumps geomVersion as well as version, so the character's shadow maps follow.

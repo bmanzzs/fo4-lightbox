@@ -3144,7 +3144,7 @@ export class Renderer {
     for (const m of this.models) if (m.visible) for (const s of m.shapes) {
       if (!pickable(s)) continue;
       draws.push([s, this.pushInst(ib, this.playerWorld(s)), 1, targets.length]);
-      targets.push({ kind: 'model', model: m });
+      targets.push({ kind: 'model', model: m, shape: s });       // (shape: Alt+click selects it alone)
     }
     for (const t of this.cellVisible ? this.cellTemplates : []) for (const s of t.shapes) {
       const b = s._batch;
@@ -3187,6 +3187,9 @@ export class Renderer {
     if (sel.kind === 'model') {
       if (!sel.model.visible) return out;
       for (const s of sel.model.shapes) if (s.visible && s.mat.kind !== 'none' && s._ib) out.push([s, this.playerWorld(s)]);
+    } else if (sel.kind === 'shape') {                 // one shape of a model (Alt+click, the Scene list's shape rows)
+      const s = sel.shape;
+      if (sel.model.visible && s.visible && s.mat.kind !== 'none' && s._ib) out.push([s, this.playerWorld(s)]);
     } else {
       for (const s of sel.tpl.shapes) {
         const it = s._batch && s._batch.inst[sel.index];

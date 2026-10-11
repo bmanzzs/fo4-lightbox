@@ -1,0 +1,854 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FO4 Lightbox</title>
+<link rel="icon" href="icon.png">
+<!-- every page module asked for at once (main.js imports the others, renderer.js imports more: three request rounds) -->
+<link rel="modulepreload" href="js/main.js">
+<link rel="modulepreload" href="js/renderer.js">
+<link rel="modulepreload" href="js/shaders.js">
+<link rel="modulepreload" href="js/math.js">
+<link rel="modulepreload" href="js/dds.js">
+<link rel="modulepreload" href="js/cloth.js">
+<link rel="modulepreload" href="js/particles.js">
+<link rel="modulepreload" href="js/anim.js">
+<link rel="modulepreload" href="js/weather.js">
+<link rel="modulepreload" href="js/icons.js">
+<link rel="modulepreload" href="js/pathtags.js">
+<link rel="modulepreload" href="js/animtags.js">
+<link rel="modulepreload" href="js/widgets.js">
+<link rel="modulepreload" href="js/thumbs.js">
+<link rel="modulepreload" href="js/world.js">
+<link rel="modulepreload" href="js/places.js">
+<link rel="modulepreload" href="js/game.js">
+<link rel="modulepreload" href="js/gizmo.js">
+<style>
+:root {
+  --bg: #121417; --panel: #1a1d22; --panel2: #22262c; --line: #2e333a; --text: #d9dde3; --dim: #8b939e;
+  --accent: #e8b04a; --accent2: #6fc3a0; --bad: #e36d5d; --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --pip: #3dff5e;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.4 system-ui, "Segoe UI", sans-serif; }
+#app { display: grid; grid-template-columns: var(--side-w, 340px) 1fr; height: calc(100vh - 27px); position: relative; }
+#app.right { grid-template-columns: 1fr var(--side-w, 340px); }
+#app.right #side { order: 2; border-right: 0; border-left: 1px solid var(--line); }
+#app.noside { grid-template-columns: 1fr; }
+#app.noside #side, #app.noside #splitter { display: none; }
+#splitter { position: absolute; top: 0; bottom: 0; left: var(--side-w, 340px); width: 7px; margin-left: -4px; cursor: col-resize; z-index: 20; }
+#app.right #splitter { left: auto; right: var(--side-w, 340px); margin: 0 -4px 0 0; }
+#splitter:hover, #splitter.drag { background: linear-gradient(90deg, transparent 3px, rgba(232,176,74,.55) 3px, rgba(232,176,74,.55) 4px, transparent 4px); }
+#showSide { position: absolute; left: 10px; top: 10px; z-index: 6; display: flex; align-items: center; gap: 6px; font-size: 11.5px; background: rgba(26,29,34,.85); }
+#showSide .ic { width: 14px; height: 14px; }
+/* menu bar: slim, File / View / Help, the game folder dimmed on the right */
+#menubar { height: 27px; display: flex; align-items: center; gap: 1px; padding: 0 8px; background: #15181c; border-bottom: 1px solid var(--line);
+  font-size: 12px; user-select: none; position: relative; z-index: 50; }
+#menubar .brand { font-weight: 700; letter-spacing: .4px; margin-right: 12px; font-size: 12.5px; white-space: nowrap; }
+#menubar .brand b { color: var(--accent); }
+.mtools { display: flex; align-items: center; gap: 1px; padding-right: 7px; margin-right: 5px; border-right: 1px solid var(--line); height: 17px; }
+.mtools button { display: flex; align-items: center; justify-content: center; width: 23px; height: 21px; padding: 0; background: transparent; border: 0;
+  border-radius: 5px; color: #8b939e; }
+.mtools button:hover { background: rgba(255,255,255,.07); color: var(--accent); }
+.mtools .ic { width: 14px; height: 14px; }
+.mtools .msep { width: 1px; height: 13px; background: var(--line); margin: 0 4px; }
+.menu { position: relative; }
+.mtop { background: transparent; border: 0; border-radius: 5px; padding: 3px 9px; color: #aab1bb; font-size: 12px; }
+.mtop:hover, .menu.open .mtop { background: rgba(255,255,255,.07); color: var(--text); border-color: transparent; }
+.mdrop { position: absolute; top: 25px; left: 0; min-width: 214px; background: #1d2127; border: 1px solid #353b44; border-radius: 9px; padding: 4px;
+  box-shadow: 0 14px 36px rgba(0,0,0,.55); z-index: 60; animation: popIn .12s ease-out; }
+.mdrop button { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 14px; background: transparent; border: 0;
+  border-radius: 6px; padding: 5px 10px 5px 26px; text-align: left; font-size: 12px; color: var(--text); position: relative; }
+.mdrop button:hover { background: rgba(232,176,74,.13); }
+.mdrop button small { color: var(--dim); font-size: 10.5px; }
+.mdrop button.on::before { content: ''; position: absolute; left: 10px; top: 50%; width: 8px; height: 4px; margin-top: -4px;
+  border-left: 1.6px solid var(--accent); border-bottom: 1.6px solid var(--accent); transform: rotate(-45deg); }
+.mdrop button.radio.on::before { width: 6px; height: 6px; margin-top: -3px; left: 11px; border: 0; border-radius: 50%; background: var(--accent); transform: none; }
+.mdrop .mi { position: absolute; left: 7px; top: 50%; transform: translateY(-50%); display: flex; color: var(--dim); transition: color .1s; }
+.mdrop .mi .ic { width: 14px; height: 14px; }
+.mdrop button:hover .mi { color: var(--accent); }
+.mdrop hr { border: 0; border-top: 1px solid var(--line); margin: 4px 3px; }
+.mdrop .mlabel { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--dim); padding: 5px 10px 2px; }
+.mdrop .mnote { font-size: 11px; color: var(--dim); padding: 4px 10px 4px 28px; }
+#modsMenu .mdrop { min-width: 262px; }
+.mstatus { margin-left: auto; color: #6d7581; font-size: 10.5px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 55%; }
+/* dialogs (About, Controls) */
+.modal { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; background: rgba(5,6,8,.6); }
+.modal[hidden] { display: none; }
+.aboutart { display: block; width: 100%; max-width: 560px; border-radius: 10px; margin: 0 0 14px; border: 1px solid var(--line); }
+.mbox { position: relative; width: min(540px, calc(100vw - 32px)); max-height: calc(100vh - 80px); overflow-y: auto; background: var(--panel);
+  border: 1px solid #353b44; border-radius: 12px; padding: 20px 24px 18px; box-shadow: 0 24px 60px rgba(0,0,0,.6); font-size: 13px; line-height: 1.55;
+  animation: popIn .14s ease-out; scrollbar-width: thin; }
+.mbox h3 { margin: 0; font-size: 19px; letter-spacing: .4px; } .mbox h3 b { color: var(--accent); }
+.mbox .ver { color: var(--dim); font-size: 11px; margin-bottom: 8px; }
+.mbox h4 { margin: 14px 0 3px; font-size: 10.5px; text-transform: uppercase; letter-spacing: 1px; color: var(--dim); }
+.mbox p { margin: 5px 0; }
+.mbox a { color: var(--accent); text-decoration: none; } .mbox a:hover { text-decoration: underline; }
+.mbox h5 { margin: 12px 0 2px; font-size: 12px; color: var(--text); }
+.mbox .thanks { color: var(--text); } .mbox .cnote { color: var(--dim); font-size: 12px; margin: 2px 0; }
+.mbox ul.credits { margin: 2px 0 4px; padding-left: 18px; font-size: 12px; }
+.mbox ul.credits li { margin: 3px 0; }
+.mclose { position: absolute; top: 10px; right: 10px; width: 26px; height: 26px; padding: 0; display: flex; align-items: center; justify-content: center; }
+.mclose .ic { width: 13px; height: 13px; }
+.ktable { display: grid; grid-template-columns: max-content 1fr; gap: 5px 14px; align-items: baseline; }
+.ktable > span:nth-child(odd) { white-space: nowrap; }
+#side { background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; scrollbar-width: thin; scrollbar-color: #3a4048 transparent; }
+#main { position: relative; overflow: hidden; }
+canvas#view { width: 100%; height: 100%; display: block; cursor: grab; }
+canvas#view:active { cursor: grabbing; }
+/* the transform gizmo (gizmo.js), drawn over the view; the view takes the mouse */
+canvas#gizmo { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+canvas#view.ongizmo { cursor: pointer; }
+.m .x.rs { color: var(--accent); font-size: 13px; line-height: 1; }
+header { padding: 12px 14px 8px; border-bottom: 1px solid var(--line); }
+header h1 { margin: 0; font-size: 16px; letter-spacing: .5px; }
+header h1 span { color: var(--accent); }
+header .sub { color: var(--dim); font-size: 11px; }
+section { border-bottom: 1px solid var(--line); padding: 10px 14px 12px; position: relative; }
+section > h2 { margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--dim); display: flex; justify-content: space-between; align-items: center; }
+label { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+label > span.k, .fhead .k { width: 92px; color: var(--dim); flex: none; }
+input[type=text], input[type=search], select { width: 100%; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 7px; font: inherit; }
+input[type=text]:focus, input[type=search]:focus, select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(232,176,74,.14); }
+input[type=checkbox] { -webkit-appearance: none; appearance: none; width: 15px; height: 15px; margin: 0; flex: none; border-radius: 4px;
+  background: #5b636e; border: 1px solid #727b87; display: inline-grid; place-content: center; cursor: pointer; vertical-align: middle;
+  transition: background .12s, border-color .12s; }
+input[type=checkbox]::before { content: ''; width: 9px; height: 9px; transform: scale(0); transition: transform .1s;
+  clip-path: polygon(12% 46%, 0 62%, 42% 100%, 100% 18%, 86% 4%, 40% 70%); background: #1a1406; }
+input[type=checkbox]:hover { border-color: #9aa2ad; }
+input[type=checkbox]:checked { background: var(--accent); border-color: var(--accent); }
+input[type=checkbox]:checked::before { transform: scale(1); }
+input[type=checkbox]:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(232,176,74,.3); }
+button { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; font: inherit; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); color: #1a1406; border-color: var(--accent); font-weight: 600; }
+.row { display: flex; gap: 6px; flex-wrap: wrap; }
+.val { font-family: var(--mono); font-size: 11px; color: var(--accent); min-width: 44px; text-align: right; }
+.ic { width: 16px; height: 16px; flex: none; display: block; }
+
+/* sliders */
+input[type=range] { -webkit-appearance: none; appearance: none; flex: 1; height: 18px; background: transparent; margin: 0; cursor: pointer; }
+input[type=range]::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: var(--line); }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; margin-top: -5px; border-radius: 50%;
+  background: var(--accent); border: 2px solid #20180a; box-shadow: 0 0 0 1px rgba(232,176,74,.6); transition: transform .12s; }
+input[type=range]:active::-webkit-slider-thumb { transform: scale(1.15); }
+input[type=range]::-moz-range-track { height: 4px; border-radius: 2px; background: var(--line); }
+input[type=range]::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: var(--accent); border: 2px solid #20180a; }
+input[type=range]:focus-visible { outline: none; }
+input[type=range]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 4px rgba(232,176,74,.3); }
+
+/* open: search + results popover */
+.search { position: relative; display: flex; align-items: center; }
+.search > .ic { position: absolute; left: 10px; width: 15px; height: 15px; color: var(--dim); pointer-events: none; }
+.search input[type=search] { height: 34px; padding-left: 32px; border-radius: 9px; font-size: 13px; }
+.search input[type=search]::-webkit-search-cancel-button { filter: grayscale(1) brightness(1.4); cursor: pointer; }
+.pop { position: absolute; top: 40px; left: 0; right: 0; z-index: 40; max-height: min(440px, 62vh); overflow-y: auto; scrollbar-width: thin;
+  background: #1d2127; border: 1px solid #353b44; border-radius: 11px; padding: 4px; box-shadow: 0 16px 44px rgba(0,0,0,.55);
+  transform-origin: top center; animation: popIn .14s ease-out; }
+.pop[hidden] { display: none; }
+@keyframes popIn { from { opacity: 0; transform: translateY(-4px) scale(.985); } to { opacity: 1; transform: none; } }
+.hit { display: grid; grid-template-columns: 30px 1fr auto; align-items: center; gap: 9px; padding: 6px 7px; border-radius: 8px; cursor: pointer; }
+.hit .cat { width: 30px; height: 30px; border-radius: 8px; display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--c, #8b939e) 14%, transparent); color: var(--c, var(--dim)); }
+.hit .t { min-width: 0; }
+.hit .nm { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hit .nm i { color: var(--dim); font-style: normal; font-weight: 400; }
+.hit .nm mark { background: none; color: var(--accent); }
+.chips { display: flex; gap: 4px; margin-top: 3px; overflow: hidden; }
+.chip { font-size: 10px; line-height: 16px; padding: 0 7px; border-radius: 9px; background: rgba(255,255,255,.055); color: #a9b1bc; white-space: nowrap; }
+.chip.lead { background: color-mix(in srgb, var(--c, #8b939e) 17%, transparent); color: color-mix(in srgb, var(--c, #8b939e) 75%, white); }
+.chip.dlc { background: rgba(232,176,74,.12); color: #f0c977; }
+.hit:hover, .hit.act { background: rgba(255,255,255,.045); }
+.hit.act { box-shadow: inset 2px 0 0 var(--accent); }
+.hit .wear { width: 30px; height: 30px; padding: 6px; border-radius: 8px; background: transparent; border: 1px solid transparent; color: var(--dim); opacity: 0; transition: opacity .1s; }
+.hit:hover .wear, .hit.act .wear { opacity: 1; }
+.hit .wear:hover { color: var(--accent2); border-color: rgba(111,195,160,.5); background: rgba(111,195,160,.08); }
+.hit .wear .ic { width: 16px; height: 16px; }
+.popfoot { position: sticky; bottom: -4px; margin: 4px -4px -4px; padding: 7px 11px; font-size: 10.5px; color: var(--dim); background: #1a1d22;
+  border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 8px; border-radius: 0 0 11px 11px; }
+.popempty { padding: 14px; color: var(--dim); text-align: center; }
+.pophint { padding: 12px 12px 10px; color: var(--dim); line-height: 2; }
+.pophint .chip { cursor: pointer; border: 0; font: inherit; font-size: 11px; }
+kbd { font: 10px var(--mono); border: 1px solid #3a4048; border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; color: var(--text); }
+.cat-armor { --c: #6f9fe6; } .cat-clothes { --c: #5fc0b0; } .cat-weapons { --c: #e5735f; } .cat-actors { --c: #b48ae8; }
+.cat-character { --c: #d8a3c4; } .cat-architecture { --c: #c9a777; } .cat-props { --c: #b99a7a; } .cat-landscape { --c: #84b56e; }
+.cat-plants { --c: #6fbf72; } .cat-effects { --c: #e88ad6; } .cat-furniture { --c: #c2946a; } .cat-workshop { --c: #e8b04a; }
+.cat-vehicles { --c: #8fa3b8; } .cat-sky { --c: #8cc0e8; } .cat-terminals { --c: #3dff5e; } .cat-backpack { --c: #e8b04a; } .cat-other { --c: #8b939e; }
+
+/* scene list (and the loaded cell, the World section's own layer) */
+#models .m, #cellLayer .m { display: flex; align-items: center; gap: 8px; padding: 4px 6px; margin: 0 -6px; border-radius: 7px; font-size: 12px; }
+#models .m:hover { background: rgba(255,255,255,.035); }
+#models .m.off .n, #cellLayer .m.off .n { opacity: .45; }
+#cellLayer { margin: 2px 0 10px; }
+#cellLayer .m { background: rgba(0,0,0,.32); border: 1px solid var(--line); margin: 0; padding: 5px 6px; }
+#cellLayer .m:hover { background: rgba(0,0,0,.42); }
+#cellLayer .m .n { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 7px; overflow: hidden; white-space: nowrap; }
+#cellLayer .m .n b { flex: 0 1 auto; min-width: 3em; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+#cellLayer .m .n i { flex: 0 8 auto; min-width: 0; font-style: normal; font-family: var(--mono); font-size: 10.5px; color: var(--dim);
+  overflow: hidden; text-overflow: ellipsis; }
+.tag.cell { background: rgba(232,176,74,.12); color: #f0c977; }
+.eye { width: 24px; height: 22px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--text); flex: none;
+  display: flex; align-items: center; justify-content: center; }
+.eye:hover { background: rgba(255,255,255,.07); color: var(--accent); }
+.eye.off { color: #6d7581; }
+.eye .ic { width: 16px; height: 16px; }
+#models .m .n { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 11px; }
+.tag { font-size: 10px; line-height: 16px; padding: 0 7px; border-radius: 9px; background: rgba(255,255,255,.06); color: var(--dim); white-space: nowrap; }
+.tag.imported { background: rgba(111,195,160,.13); color: var(--accent2); }
+.tag.ref { background: rgba(232,176,74,.12); color: #f0c977; }
+.x { width: 22px; height: 22px; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: 6px;
+  background: #3a1c1c; border: 1px solid #5e2727; color: #ec8f84; flex: none; }
+.x:hover { background: #5c2222; border-color: #93392f; color: #ffc1b8; }
+.x .ic { width: 12px; height: 12px; stroke-width: 2.4; }
+#clear { font-size: 10.5px; padding: 2px 8px; text-transform: none; letter-spacing: 0; }
+.clothrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; }
+.clothrow[hidden] { display: none; }
+#clothReset { font-size: 10.5px; padding: 2px 8px; text-transform: none; letter-spacing: 0; }
+
+/* reference */
+.refpick { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 8px; }
+.refbtn { position: relative; display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 5px 5px 7px; border-radius: 10px;
+  background: linear-gradient(180deg, #252a31, #1e2227); color: var(--dim); transition: border-color .15s, box-shadow .15s, color .15s; }
+.refbtn .pic { width: 100%; height: 88px; display: flex; align-items: center; justify-content: center; border-radius: 7px; overflow: hidden;
+  background: radial-gradient(ellipse at 50% 38%, #2f363f, #1b1e23 72%); }
+.refbtn .pic img { height: 100%; width: 100%; object-fit: contain; filter: saturate(.9); transition: transform .2s, filter .2s; }
+.refbtn .pic .ic { width: 46px; height: 46px; opacity: .45; }
+.refbtn .lbl { font-size: 12px; font-weight: 600; letter-spacing: .3px; }
+.refbtn:hover { border-color: #4a515b; color: var(--text); }
+.refbtn:hover .pic img { transform: scale(1.03); }
+.refbtn.on { border-color: var(--accent); color: var(--text); box-shadow: 0 0 0 1px var(--accent), 0 6px 18px rgba(232,176,74,.16); }
+.refbtn.on .lbl { color: var(--accent); }
+.refbtn.on .pic img { filter: none; }
+.refbtn .dot { position: absolute; top: 9px; right: 9px; width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid #4a515b; background: #1a1d22; }
+.refbtn.on .dot { border-color: var(--accent); background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+.refbtn.busy .pic { animation: pulse 1s ease-in-out infinite alternate; }
+.outfits { display: grid; grid-template-rows: repeat(3, 1fr); gap: 5px; min-height: 0; }
+.refbtn.half { padding: 0; overflow: hidden; justify-content: flex-end; min-height: 34px; }
+.refbtn.half .pic { position: absolute; inset: 0; height: auto; border-radius: 9px; }
+.refbtn.half .pic img { object-fit: cover; object-position: 50% 30%; }
+.refbtn.half .pic .ic { width: 20px; height: 20px; margin-bottom: 10px; }
+.refbtn.half .lbl { position: relative; width: 100%; padding: 10px 4px 3px; font-size: 10.5px;
+  background: linear-gradient(180deg, transparent, rgba(16,18,21,.94) 60%); border-radius: 0 0 9px 9px; }
+.refbtn.half .dot { top: 5px; right: 5px; width: 8px; height: 8px; z-index: 1; }
+/* location shortcuts: like the reference cards, smaller; the picture fills the button, the name sits on it */
+.places { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+/* the plain backgrounds, either side of the places: NifSkope black, Outfit Studio grey */
+.placerow { display: grid; grid-template-columns: 11px 1fr 11px; gap: 6px; margin: 8px 0 2px; }
+.bdbtn { padding: 0; min-width: 0; border-radius: 6px; border: 1px solid #3a4048; transition: border-color .15s, box-shadow .15s; }
+.bdbtn.black { background: #000; }
+.bdbtn.grey { background: #959595; }
+.bdbtn:hover { border-color: #77808c; }
+.bdbtn.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 4px 14px rgba(232,176,74,.16); }
+#cellRadius #bdGrid { flex: .8; }
+#cellRadius #bdGrid:disabled { opacity: .35; }
+#cellRadius #evenLight { flex: .55; display: flex; align-items: center; justify-content: center; padding: 0; }
+#evenLight .ic { width: 15px; height: 15px; }
+#evenLight.on .ic path:nth-child(2) { fill: rgba(255, 214, 120, .55); }
+#evenLight.on { color: #ffd678; }
+/* NifSkope's corner axes sit where the view info starts: move it aside while they show */
+body.axes #viewinfo { left: calc(14px + 125px / var(--dpr, 1)); }
+.placebtn { position: relative; height: 44px; padding: 0; overflow: hidden; border-radius: 8px; display: flex; align-items: flex-end;
+  background: radial-gradient(ellipse at 50% 38%, #2f363f, #1b1e23 72%); color: var(--dim); transition: border-color .15s, box-shadow .15s; }
+.placebtn .pic { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+.placebtn .pic img { width: 100%; height: 100%; object-fit: cover; filter: saturate(.9); transition: transform .2s, filter .2s; }
+.placebtn .pic .ic { width: 18px; height: 18px; opacity: .4; margin-bottom: 10px; }
+.placebtn .lbl { position: relative; width: 100%; padding: 8px 5px 2px; font-size: 8.5px; line-height: 1.15; font-weight: 600; text-align: left;
+  color: #e6e9ed; background: linear-gradient(180deg, transparent, rgba(12,14,17,.9) 45%); overflow-wrap: anywhere; }   /* long names wrap, never "..." */
+.placebtn:hover .pic img { transform: scale(1.05); filter: none; }
+.placebtn.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 4px 14px rgba(232,176,74,.16); }
+.placebtn.on .lbl { color: var(--accent); }
+.placebtn.busy .pic { animation: pulse 1s ease-in-out infinite alternate; }
+/* body-replacer toggle on a body card (CBBE): a tiny checkbox at the figure's feet */
+.modchk { position: absolute; left: 50%; bottom: 25px; transform: translateX(-50%); z-index: 1; display: flex; align-items: center; gap: 4px;
+  padding: 1px 6px 1px 3px; border-radius: 5px; background: rgba(12,14,17,.78); border: 1px solid #3a4048; font-size: 9.5px; font-weight: 600;
+  letter-spacing: .3px; color: var(--dim); cursor: pointer; white-space: nowrap; }
+.modchk .box { width: 10px; height: 10px; border-radius: 3px; background: #5b636e; border: 1px solid #727b87; display: grid; place-content: center; }
+.modchk .box::before { content: ''; width: 7px; height: 7px; transform: scale(0); background: #1a1406;
+  clip-path: polygon(12% 46%, 0 62%, 42% 100%, 100% 18%, 86% 4%, 40% 70%); }
+.modchk.on { color: var(--accent); border-color: rgba(232,176,74,.55); }
+.modchk.on .box { background: var(--accent); border-color: var(--accent); }
+.modchk.on .box::before { transform: scale(1); }
+.modchk:hover { color: var(--text); }
+.modchk:focus-visible { outline: none; box-shadow: 0 0 0 2px rgba(232,176,74,.4); }
+.shead > .grow { flex: 1; }
+#refFile.slim { gap: 6px; font-size: 11px; padding: 3px 10px; margin-top: 2px; }
+#refFile.slim .ic { width: 13px; height: 13px; }
+.sunrow { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.sunrow > .ik { width: 24px; color: var(--dim); display: flex; flex: none; }
+.sunrow > .ik .ic { width: 18px; height: 18px; }
+.ibtn.tog { width: 28px; height: 24px; color: var(--dim); }
+.ibtn.tog .ic { width: 16px; height: 16px; }
+.ibtn.tog.on { color: var(--accent); border-color: rgba(232,176,74,.6); background: rgba(232,176,74,.1); }
+.ibtn:disabled { opacity: .35; cursor: default; }
+.ibtn:disabled:hover { border-color: var(--line); }
+@keyframes pulse { from { opacity: .55; } to { opacity: 1; } }
+.ibtn { width: 32px; height: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; flex: none; color: var(--text); }
+.ibtn .ic { width: 15px; height: 15px; }
+.ibtn .ic.thick { stroke-width: 2.6; }
+.ibtn:hover { color: var(--accent); }
+.transport { display: flex; align-items: center; gap: 6px; margin: 8px 0 4px; }
+.transport input[type=range] { margin-left: 4px; }
+.hit.off { opacity: .55; }
+.hit .go { width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; color: var(--dim); opacity: 0; transition: opacity .1s; }
+.hit:hover .go, .hit.act .go { opacity: 1; color: var(--accent2); }
+.hit .go .ic { width: 14px; height: 14px; }
+.chip.warn { background: rgba(227,109,93,.14); color: #f0a196; }
+.acat-move { --c: #6fc3a0; } .acat-idle { --c: #8cc0e8; } .acat-weapon { --c: #e5735f; } .acat-melee { --c: #e89a5f; }
+.acat-unarmed { --c: #d8a3c4; } .acat-furniture { --c: #c2946a; } .acat-paired { --c: #b48ae8; } .acat-creature { --c: #84b56e; }
+.acat-powerarmor { --c: #6f9fe6; } .acat-firstperson { --c: #8b939e; } .acat-object { --c: #b99a7a; } .acat-other { --c: #8b939e; }
+#models { margin-top: 4px; }
+/* a section title with its search box (and button) on one row; the results float under the whole row */
+.shead { display: flex; align-items: center; gap: 8px; }
+.shead > h2 { margin: 0; flex: none; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--dim); display: flex; align-items: center; gap: 6px; }
+.shead > button { flex: none; }
+.search.mini { position: static; flex: 1; min-width: 0; }
+.search.mini .sbox { position: relative; display: flex; align-items: center; width: 100%; }
+.search.mini .sbox > .ic { position: absolute; left: 8px; width: 13px; height: 13px; color: var(--dim); pointer-events: none; }
+.search.mini input[type=search] { height: 28px; padding: 0 6px 0 27px; font-size: 12px; border-radius: 8px; }
+.search.mini > .pop { top: 44px; left: 14px; right: 14px; }
+#models:empty { display: none; }
+.wide { width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 7px 10px; margin-top: 6px; }
+.wide .ic { color: var(--accent2); }
+
+/* environment */
+.field { margin: 6px 0 10px; }
+.fhead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; }
+.fhead .val { font-size: 12px; font-family: inherit; font-weight: 600; }
+.wslider { position: relative; height: 50px; --pad: 14px; --n: 8; --i: 0; outline: none; cursor: pointer; touch-action: none; }
+.wtrack { position: absolute; left: var(--pad); right: var(--pad); top: 8px; height: 4px; border-radius: 2px; background: var(--line); }
+.wthumb { position: absolute; top: 3px; width: 14px; height: 14px; margin-left: -7px; border-radius: 50%; background: var(--accent);
+  border: 2px solid #20180a; box-shadow: 0 0 0 1px rgba(232,176,74,.6), 0 0 10px rgba(232,176,74,.35);
+  left: calc(var(--pad) + (100% - 2 * var(--pad)) * var(--i) / var(--n)); transition: left .18s cubic-bezier(.3,.7,.3,1); pointer-events: none; }
+.wslider:focus-visible .wthumb { box-shadow: 0 0 0 4px rgba(232,176,74,.3); }
+.wslider.none .wthumb { opacity: 0; }
+.wstop { position: absolute; top: 0; height: 50px; width: 26px; margin-left: -13px; display: flex; flex-direction: column; align-items: center;
+  left: calc(var(--pad) + (100% - 2 * var(--pad)) * var(--i) / var(--n)); color: #6d7581; transition: color .15s; }
+.wstop .wtick { display: block; width: 2px; height: 6px; margin-top: 16px; border-radius: 1px; background: #3d434c; }
+.wstop .ic { width: 20px; height: 20px; margin-top: 4px; transition: transform .15s, filter .15s; }
+.wstop:hover { color: var(--text); }
+.wstop.on { color: var(--accent); }
+.wstop.on .wtick { background: var(--accent); }
+.wstop.on .ic { transform: scale(1.12); filter: drop-shadow(0 0 4px rgba(232,176,74,.55)); }
+.pip { font-family: Monofonto, "Share Tech Mono", "Cascadia Mono", Consolas, ui-monospace, monospace; font-size: 15px; font-weight: 600;
+  letter-spacing: 1.5px; color: var(--pip); padding: 1px 9px; border-radius: 4px; border: 1px solid rgba(61,255,94,.28);
+  text-shadow: 0 0 4px rgba(61,255,94,.8), 0 0 11px rgba(61,255,94,.35);
+  background: repeating-linear-gradient(0deg, rgba(0,0,0,.32) 0 1px, transparent 1px 3px), radial-gradient(ellipse at 50% 40%, #0b2a12, #041007);
+  box-shadow: inset 0 0 9px rgba(61,255,94,.14); }
+#hour { width: 100%; display: block; }
+#hour::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: linear-gradient(90deg, #172038 0%, #172038 20.8%,
+  #b9684a 27%, #e2a467 31%, #79acd8 37.5%, #93c6ea 50%, #79acd8 70.8%, #e09a62 77%, #b25b43 81%, #172038 87.5%, #172038 100%); }
+#hour::-moz-range-track { height: 6px; border-radius: 3px; background: linear-gradient(90deg, #172038 0%, #172038 20.8%,
+  #b9684a 27%, #e2a467 31%, #79acd8 37.5%, #93c6ea 50%, #79acd8 70.8%, #e09a62 77%, #b25b43 81%, #172038 87.5%, #172038 100%); }
+#hour::-webkit-slider-thumb { margin-top: -4px; }
+.hticks { position: relative; height: 20px; margin: 2px 7px 0; }
+.ht { position: absolute; top: 0; left: calc(var(--p) * 100%); width: 1px; height: 3px; background: #3d434c; }
+.ht.maj { height: 6px; background: #6d7581; }
+.ht b { position: absolute; top: 7px; left: 0; transform: translateX(-50%); font: 10px var(--mono); color: var(--dim); font-weight: 400; white-space: nowrap; }
+.ht:first-child b { transform: none; }
+.ht:last-child b { transform: translateX(-100%); }
+.ht:nth-child(13) b { color: var(--text); }
+.checks { display: flex; gap: 16px; }
+.timerow { display: flex; align-items: center; gap: 8px; margin: 6px 0 4px; }
+.timerow > .ic { color: var(--dim); transition: color .15s, transform .4s; }
+.timerow.on > .ic { color: var(--accent); }
+.timerow.on #timeBtn { color: var(--accent); border-color: var(--accent); background: rgba(232,176,74,.12); }
+.timerow .sp { color: var(--dim); opacity: .75; display: flex; }
+.timerow .sp .ic { width: 12px; height: 12px; }
+.timerow input[type=range] { opacity: .5; transition: opacity .15s; }
+.timerow.on input[type=range] { opacity: 1; }
+.switch { position: relative; display: inline-block; width: 34px; height: 19px; margin: 0; flex: none; cursor: pointer; }
+.switch input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.switch .knob { position: absolute; inset: 0; border-radius: 10px; background: #2b3037; border: 1px solid #3a4048; pointer-events: none;
+  transition: background .15s, border-color .15s; }
+.switch .knob::after { content: ''; position: absolute; top: 2px; left: 2px; width: 13px; height: 13px; border-radius: 50%; background: #8b939e;
+  transition: transform .15s, background .15s; }
+.switch input:checked + .knob { background: rgba(232,176,74,.22); border-color: var(--accent); }
+.switch input:checked + .knob::after { transform: translateX(15px); background: var(--accent); box-shadow: 0 0 6px rgba(232,176,74,.6); }
+.switch input:focus-visible + .knob { box-shadow: 0 0 0 3px rgba(232,176,74,.3); }
+label > span.ik { width: 24px; color: var(--dim); display: flex; }
+label > span.ik .ic { width: 18px; height: 18px; }
+.frow { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.frow > .k { width: 92px; color: var(--dim); flex: none; }
+.frow .seg { flex: 1; margin-top: 0; }
+.iseg button { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 5px 0; }
+.iseg button .ic { width: 15px; height: 15px; }
+details.adv { margin: 6px 0 0; }
+details.adv > summary { list-style: none; display: flex; align-items: center; gap: 6px; font: 11.5px system-ui, "Segoe UI", sans-serif;
+  color: var(--dim); padding: 3px 0; user-select: none; }
+details.adv > summary::-webkit-details-marker { display: none; }
+details.adv > summary .ic { width: 13px; height: 13px; transform: rotate(-90deg); transition: transform .15s; }
+details.adv[open] > summary .ic { transform: none; }
+details.adv > summary:hover { color: var(--text); }
+section.fold h2 { cursor: pointer; user-select: none; }
+section.fold > h2 { justify-content: flex-start; gap: 6px; }
+section.fold.closed > h2 { margin-bottom: 0; }
+section.fold h2 > .ic { width: 13px; height: 13px; transition: transform .15s; flex: none; order: -1; margin-left: -2px; }
+section.fold.closed h2 > .ic { transform: rotate(-90deg); }
+section.fold h2:hover { color: var(--text); }
+section.fold.closed > :not(h2):not(.shead) { display: none !important; }
+#viewinfo { position: absolute; left: 10px; right: 10px; bottom: 10px; display: flex; flex-wrap: wrap-reverse; align-items: flex-end;
+  gap: 8px; pointer-events: none; }
+#keys { margin-left: auto; flex: 0 1 auto; min-width: 230px; max-width: 560px; font-size: 11.5px; line-height: 1.95; color: #cfd6df;
+  background: rgba(10,12,14,.55); padding: 4px 10px; border-radius: 6px; pointer-events: none; text-align: right; }
+#keys kbd { background: rgba(255,255,255,.07); }
+.hit .nm .file { color: var(--dim); font-size: 10.5px; font-weight: 400; margin-left: 6px; }
+#keys b { color: var(--accent); font-weight: 600; }
+.seg { display: flex; margin-top: 8px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { flex: 1; border: 0; border-radius: 0; background: transparent; color: var(--dim); padding: 4px 0; font-size: 11.5px; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button.on { background: rgba(232,176,74,.13); color: var(--accent); font-weight: 600; }
+.seg button:hover { color: var(--text); }
+/* before / after (Reload textures & materials): the split line over the view and the bar at its top left */
+#baSplit { position: absolute; top: 0; bottom: 0; width: 18px; margin-left: -9px; z-index: 3; cursor: ew-resize; touch-action: none; }
+#baSplit i { position: absolute; left: 8px; top: 0; bottom: 0; width: 2px; background: var(--accent); box-shadow: 0 0 0 1px rgba(0,0,0,.35); }
+#baSplit span { position: absolute; top: 46px; font: 600 11px var(--mono); letter-spacing: .06em; text-transform: uppercase;
+  color: #fff; background: rgba(10,12,14,.62); padding: 3px 7px; border-radius: 4px; white-space: nowrap; pointer-events: none; }
+#baSplit .l { right: 14px; } #baSplit .r { left: 14px; }
+#baBar { position: absolute; left: 12px; bottom: 12px; z-index: 3; max-width: min(460px, calc(100% - 24px)); padding: 9px 12px;
+  background: rgba(26,29,34,.9); border: 1px solid var(--line); border-radius: 10px; font-size: 12px; }
+#baBar .row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+#baBar .hint { color: var(--dim); font-size: 11px; flex: 1; }
+#baBar kbd { font: 10px var(--mono); padding: 0 4px; border: 1px solid var(--line); border-radius: 3px; }
+#baBar .x { background: none; border: 0; color: var(--dim); cursor: pointer; font-size: 13px; }
+#baList { max-height: 120px; overflow: auto; font: 11px var(--mono); color: var(--dim); }
+#baList div { display: flex; gap: 10px; justify-content: space-between; white-space: nowrap; }
+#baList b { color: var(--text); font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
+body.capture #baSplit, body.capture #baBar { display: none !important; }
+/* cell loading, over the top left of the view (the toolbar is on the right) */
+#loadBar { position: absolute; left: 12px; top: 12px; width: clamp(220px, calc(100% - 620px), 460px); z-index: 3;
+  padding: 9px 12px 11px; background: rgba(26,29,34,.88); border: 1px solid var(--line); border-radius: 10px;
+  pointer-events: none; transition: opacity .4s; }
+#loadBar.done { opacity: 0; }
+#loadBar .lbl { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; font-size: 12px; }
+#loadBar .nm { font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#loadBar .ct { font: 11px var(--mono); color: var(--dim); white-space: nowrap; }
+#loadBar .bar { height: 10px; border-radius: 5px; background: var(--line); overflow: hidden; }
+#loadBar .bar i { display: block; height: 100%; width: 0; border-radius: 5px; background: var(--accent); transition: width .2s; }
+.itemcard { margin-top: 9px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 10px; background: linear-gradient(180deg, #20242a, #1c1f24); }
+.itemcard .ih { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.itemcard .ih b { font-size: 13px; }
+.itemcard .isub { font: 10.5px var(--mono); color: var(--dim); margin: 2px 0 7px; word-break: break-all; }
+.itemcard label { margin: 6px 0 8px; }
+.irow { display: grid; grid-template-columns: 74px 1fr auto; gap: 6px; align-items: center; padding: 3px 0; border-top: 1px solid rgba(255,255,255,.04); font-size: 11.5px; }
+.irow .k { color: var(--dim); }
+.irow .v { font: 11px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.badge { font-size: 10px; line-height: 16px; padding: 0 7px; border-radius: 9px; white-space: nowrap; background: rgba(255,255,255,.06); color: var(--dim); }
+.badge.loose { background: rgba(111,195,160,.13); color: var(--accent2); }
+.badge.missing { background: rgba(227,109,93,.18); color: #ff9b8f; font-weight: 600; }
+.itemcard .row { margin-top: 8px; }
+.itemcard .row button { flex: 1; }
+.tag.plugin { background: rgba(232,176,74,.12); color: #f0c977; }
+.wide.play { margin-top: 9px; font-weight: 600; }
+.wide.play .pi { color: var(--accent); font-size: 11px; }
+.wide.play.on { background: rgba(232,176,74,.14); border-color: var(--accent); color: var(--accent); }
+/* capture mode (tools/capture.py): the view alone, at the window's exact size */
+body.capture #app { grid-template-columns: 1fr; }
+body.capture #side, body.capture #toolbar, body.capture #hud, body.capture #toast, body.capture #keys, body.capture #menubar,
+body.capture #splitter, body.capture #showSide, body.capture #loadBar, body.capture #gizmo { display: none !important; }
+body.capture #app { height: 100vh; }
+
+details { margin: 4px 0; }
+summary { cursor: pointer; color: var(--text); font-family: var(--mono); font-size: 11px; }
+.results { max-height: 220px; overflow-y: auto; margin-top: 6px; font-family: var(--mono); font-size: 11px; }
+.results div { padding: 3px 6px; border-radius: 4px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.results div:hover { background: var(--panel2); color: var(--accent); }
+.kv { font-family: var(--mono); font-size: 11px; color: var(--dim); white-space: pre-wrap; word-break: break-all; padding: 4px 0 4px 10px; }
+.kv b { color: var(--text); font-weight: normal; }
+#hud { flex: none; font-family: var(--mono); font-size: 11px; color: #cfd6df; background: rgba(10,12,14,.55); padding: 6px 9px; border-radius: 5px; pointer-events: none; white-space: pre; }
+#hud .sel { color: #8ff0a4; }
+#toolbar { position: absolute; right: 10px; top: 10px; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+#toolbar button { background: rgba(26,29,34,.85); }
+#toolbar button.primary { background: var(--accent); }
+#drop { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; font-size: 22px; background: rgba(232,176,74,.12); border: 3px dashed var(--accent); }
+#log { font-family: var(--mono); font-size: 11px; color: var(--dim); max-height: 160px; overflow-y: auto; white-space: pre-wrap; }
+#log .w { color: var(--bad); }
+.note { color: var(--dim); font-size: 11px; }
+#dataNote { position: absolute; left: 50%; bottom: 58px; transform: translateX(-50%); display: flex; align-items: center; gap: 10px;
+  background: rgba(26,29,34,.96); border: 1px solid var(--accent); border-radius: 6px; padding: 6px 8px 6px 12px; max-width: calc(100% - 40px); z-index: 4; }
+#dataNote span { color: var(--text); }
+#dataNote button.x { background: transparent; border: 0; color: var(--dim); padding: 2px 6px; }
+body.capture #dataNote { display: none !important; }
+#toast { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); background: rgba(26,29,34,.95); border: 1px solid var(--line); border-radius: 6px; padding: 7px 12px; display: none; }
+@media (max-width: 800px) { #app, #app.right { grid-template-columns: 1fr; grid-template-rows: 55vh 1fr; } #splitter { display: none; } #main { grid-row: 1; } #side { grid-row: 2; } }
+</style>
+</head>
+<body>
+<nav id="menubar">
+  <span class="brand">FO4 <b>Lightbox</b></span>
+  <div class="mtools">
+    <button data-act="import" data-icon="file" title="Import .nif…"></button>
+    <button data-act="screenshot" data-icon="camera" title="Save screenshot"></button>
+    <span class="msep"></span>
+    <button data-act="saveSettings" data-icon="save" title="Save settings…"></button>
+    <button data-act="loadSettings" data-icon="open" title="Load settings…"></button>
+    <button data-act="resetSettings" data-icon="restart" title="Reset settings…"></button>
+  </div>
+  <div class="menu"><button class="mtop">File</button><div class="mdrop" hidden>
+    <button data-act="import"><span class="mi" data-icon="file"></span>Import .nif…</button>
+    <button data-act="screenshot"><span class="mi" data-icon="camera"></span>Save screenshot</button>
+    <hr>
+    <button data-act="reloadAssets" title="Read again only the textures, materials and meshes of the loaded models that changed on disk; the camera, pose, hour and weather stay. The previous look stays as 'before': drag the split line to compare (key R)"><span class="mi" data-icon="restart"></span>Reload textures &amp; materials <kbd>R</kbd></button>
+    <button data-act="reloadData" title="Read plugins and archives saved since the scene was loaded, and load the scene again"><span class="mi" data-icon="restart"></span>Reload game files</button>
+    <hr>
+    <button data-act="saveSettings"><span class="mi" data-icon="save"></span>Save settings…</button>
+    <button data-act="loadSettings"><span class="mi" data-icon="open"></span>Load settings…</button>
+    <button data-act="resetSettings"><span class="mi" data-icon="restart"></span>Reset settings…</button>
+  </div></div>
+  <div class="menu"><button class="mtop">View</button><div class="mdrop" hidden>
+    <div class="mlabel">Layout</div>
+    <button class="radio" data-act="layout" data-v="studio">Studio</button>
+    <button class="radio" data-act="layout" data-v="compact">Compact</button>
+    <button class="radio" data-act="layout" data-v="viewport">Viewport only</button>
+    <hr>
+    <button data-act="right">Sidebar on the right</button>
+    <button data-act="hud">Info overlay</button>
+    <button data-act="keys">Key hints</button>
+    <button data-act="autoreload" title="On: the scene loads again by itself when plugins or archives are saved. Off: a notice offers to reload">Reload when game files change</button>
+    <hr>
+    <button data-act="foldAll">Fold all panels</button>
+    <button data-act="unfoldAll">Unfold all panels</button>
+  </div></div>
+  <div class="menu" id="modsMenu"><button class="mtop">Mods</button><div class="mdrop" hidden>
+    <div class="mlabel">Read the game files from</div>
+    <div id="sourceList"><div class="mnote">looking…</div></div>
+    <hr>
+    <button data-act="addMO2" title="A Mod Organizer 2 that was not found by itself (a portable install in its own folder)">Add a Mod Organizer 2 folder…</button>
+    <button data-act="reloadData" title="Read the mod list, plugins and archives again (files added to a mod's folder since)">Read the mods again</button>
+  </div></div>
+  <div class="menu"><button class="mtop">Help</button><div class="mdrop" hidden>
+    <button data-act="controls">Controls</button>
+    <button data-act="about">About FO4 Lightbox</button>
+  </div></div>
+  <span class="mstatus" id="status">connecting…</span>
+</nav>
+<div id="app">
+  <aside id="side">
+
+    <section class="fold" id="secScene">
+      <div class="shead"><h2>Scene<span class="chev"></span></h2>
+        <div class="search mini"><span class="sbox"><span id="searchIcon"></span>
+          <input type="search" id="search" placeholder="Search meshes, e.g. backpack" autocomplete="off" spellcheck="false" aria-label="Search meshes"></span>
+          <div id="results" class="pop" hidden></div></div>
+        <button id="clear" title="Remove all models">clear all</button></div>
+      <div id="models"></div>
+    </section>
+
+    <section class="fold" id="secWorld">
+      <div class="shead"><h2>World<span class="chev"></span></h2>
+        <div class="search mini"><span class="sbox"><span id="cellSearchIcon"></span>
+          <input type="search" id="cellSearch" placeholder="Find a cell, e.g. sanctuary" autocomplete="off" spellcheck="false" aria-label="Find a cell"></span>
+          <div id="cellResults" class="pop" hidden></div></div></div>
+      <div id="cellLayer" hidden></div>
+      <div class="placerow">
+        <button class="bdbtn black" id="bdBlack" title="NifSkope black: a plain black background with NifSkope's grid, in place of the sky and floor (light and exposure stay those of the Studio)"></button>
+        <div class="places" id="places"></div>
+        <button class="bdbtn grey" id="bdGrey" title="Outfit Studio grey: a plain grey background (RGB 149) with NifSkope's grid, in place of the sky and floor (light and exposure stay those of the Studio)"></button>
+      </div>
+      <div class="seg" id="cellRadius" title="Exterior cells: how many cells around the chosen one">
+        <button data-r="0">1 cell</button><button data-r="1" class="on">3×3</button><button data-r="2">5×5</button>
+        <button id="bdGrid" class="on" title="Grid: NifSkope's floor grid and corner axes on the black or grey background">grid</button>
+        <button id="evenLight" title="Even light, like NifSkope and Outfit Studio: one light from the camera and the same light from every side, so every part is lit wherever you look. No shadows, ambient occlusion, light shafts, fog or colour grading. Click again for the weather's light"></button>
+      </div>
+      <button class="wide play" id="gameBtn" title="Walk your character (reference body + everything it wears) through the scene: G or Esc to leave">
+        <span class="pi">▶</span> <span id="gameBtnText">Play as character</span> <kbd>G</kbd></button>
+    </section>
+
+    <section class="fold" id="secRef">
+      <h2>Reference<span class="chev"></span></h2>
+      <div class="refpick">
+        <button class="refbtn" id="refMale" title="Male body (hands, head and eyes included)"><span class="dot"></span><span class="pic"></span><span class="lbl">Male</span></button>
+        <button class="refbtn" id="refFemale" title="Female body (hands, head and eyes included)"><span class="dot"></span><span class="pic"></span><span class="lbl">Female</span></button>
+        <div class="outfits">
+          <button class="refbtn half" id="refVault" title="Vault 111 jumpsuit, on the chosen body (click again to take it off)"><span class="dot"></span><span class="pic"></span><span class="lbl">Vault Suit</span></button>
+          <button class="refbtn half" id="refLeathers" title="Road Leathers (Fallout4.esm raider under-armour), on the chosen body (click again to take it off)"><span class="dot"></span><span class="pic"></span><span class="lbl">Road Leathers</span></button>
+          <button class="refbtn half" id="refRadstag" title="Radstag Hide Outfit (the outfit most NPCs wear in Fallout 4), on the chosen body (click again to take it off)"><span class="dot"></span><span class="pic"></span><span class="lbl">Radstag Hide</span></button>
+        </div>
+      </div>
+      <input type="checkbox" id="bodyMod" hidden>
+      <button class="wide slim" id="refFile" title="Pick a .nif to wear on the reference body (its textures still come from the game). Armour from the game itself: use the hanger button on a search result."><span id="refFileIcon"></span>Import .nif</button>
+      <input type="file" id="refFileInput" accept=".nif" multiple hidden>
+    </section>
+
+    <section class="fold" id="secEnv">
+      <h2>Environment<span class="chev"></span></h2>
+      <div class="field">
+        <div class="fhead"><span class="k">Weather</span><span class="val" id="weatherV">…</span></div>
+        <div id="weatherSlider"></div>
+      </div>
+      <div class="field">
+        <div class="fhead"><span class="k">Game hour</span><span class="pip" id="hourV">12:00</span></div>
+        <input type="range" id="hour" min="0" max="24" step="0.05" value="12" aria-label="Game hour">
+        <div class="hticks" id="hourTicks"></div>
+      </div>
+      <div class="timerow" id="timeRow">
+        <span id="timeIcon"></span>
+        <button class="ibtn" id="timeBtn" title="Let time run"></button><input type="checkbox" id="timePlay" hidden>
+        <span class="sp" id="slowIcon" title="slower"></span>
+        <input type="range" id="timeRate" min="0" max="1" step="0.01" value="0.44" aria-label="How fast time runs">
+        <span class="sp" id="fastIcon" title="faster"></span>
+        <span class="val" id="timeRateV">10 s</span>
+      </div>
+      <div class="sunrow"><span class="ik" id="sunAzIcon" title="Sun direction: turns the sun's path around the scene (0° = where the game puts it)"></span>
+        <input type="range" id="sunAz" min="-180" max="180" step="1" value="0" aria-label="Sun direction" title="Sun direction: turns the sun's path around the scene (0° = where the game puts it)"><span class="val" id="sunAzV">0°</span>
+        <button class="ibtn tog on" id="shadowsBtn" aria-pressed="true"></button>
+        <button class="ibtn tog on" id="floorBtn" aria-pressed="true"></button></div>
+      <div class="note" id="weatherNote"></div>
+    </section>
+
+    <section class="fold" id="secAnim">
+      <h2>Animation<span class="chev"></span></h2>
+      <div class="field">
+        <div class="fhead"><span class="k">Body pose</span><span class="val" id="poseV">Bind pose</span></div>
+        <div id="poseSlider"></div>
+      </div>
+      <div class="search">
+        <span id="hkxSearchIcon"></span>
+        <input type="search" id="hkxSearch" placeholder="Find a clip, e.g. sneak idle, sit, reload" autocomplete="off" spellcheck="false">
+        <div id="hkxResults" class="pop" hidden></div>
+      </div>
+      <div class="transport">
+        <button class="ibtn" id="play" title="Pause" aria-label="Pause"></button>
+        <button class="ibtn" id="restart" title="Restart from the first frame" aria-label="Restart"></button>
+        <input type="range" id="speed" min="0" max="3" step="0.05" value="1" title="Playback speed" aria-label="Playback speed"><span class="val" id="speedV">1.00×</span>
+      </div>
+      <label style="display:none"><span class="k">Sequence</span><select id="seq"></select></label>
+      <div class="note" id="animInfo">Nothing in the scene animates on its own.</div>
+      <div class="clothrow" id="clothRow" hidden>
+        <label title="Simulate the Havok cloth of the worn items (coats, skirts, dangling pouches) with Lightbox's own solver. Experimental: not yet compared with the game, and a few outfits still shiver a little at rest. Off: the cloth follows the body without moving on its own, like the game's Animate state"><input type="checkbox" id="clothSim"> cloth physics (experimental)</label>
+        <button id="clothReset" title="Put the cloth back on the body and let it settle again">reset</button>
+      </div>
+      <div class="note" id="clothInfo" hidden></div>
+    </section>
+
+    <section class="fold" id="secCamera">
+      <h2>Camera &amp; image<span class="chev"></span></h2>
+      <label><span class="k">FOV (game)</span><input type="range" id="fov" min="20" max="100" step="1" value="55"><span class="val" id="fovV">55</span></label>
+      <div class="frow"><span class="k">Exposure</span>
+        <div class="seg iseg" id="expMode">
+          <button data-v="auto" class="on" title="Auto exposure: brightness adapts to the scene, like the game's eye adaptation. EV shifts it up or down."><span id="expAutoIcon"></span>Auto</button>
+          <button data-v="manual" title="Fixed exposure: no adaptation. The EV slider alone sets the brightness, so renders stay comparable."><span id="expFixedIcon"></span>Fixed</button>
+        </div>
+      </div>
+      <label><span class="k">EV</span><input type="range" id="ev" min="-6" max="6" step="0.1" value="0"><span class="val" id="evV">0.0</span></label>
+      <label><input type="checkbox" id="bloom" checked> bloom</label>
+      <label><input type="checkbox" id="grade" checked> imagespace grade (cinematic)</label>
+      <label><input type="checkbox" id="lut" checked> imagespace colour LUT</label>
+      <label title="Polished parts (buckles, clips) and fine normal-map detail no longer sparkle and flicker as they move: their highlight is widened to what one pixel can show, keeping its brightness. The game gets the same calm from its temporal anti-aliasing. Off: the raw highlight of a single frame"><input type="checkbox" id="specAA" checked> smooth shiny highlights (as the game's TAA)</label>
+      <label title="Screen-space ambient occlusion, as the game draws it (Fallout4.ini SAO: radius, bias, intensity): corners, contact areas and the gaps between parts get less of the ambient light, so objects sit on the floor and on the body instead of floating. Off: flat ambient light"><input type="checkbox" id="ao" checked> ambient occlusion (as the game)</label>
+      <label title="Cell viewer: the decals placed in the cell (grime, blood, scorch marks, puddles, paint) projected onto the walls and floors they cover, as the game draws them. Off: bare surfaces"><input type="checkbox" id="decals" checked> projected decals</label>
+      <label title="Particle systems: fire, smoke, steam, sparks, drips and dust, from the NIF's own emitters and curves. A simplified simulation: close to the game, not identical. In a cell only the effects near the camera run. Off: no particles"><input type="checkbox" id="particles" checked> particles</label>
+      <label title="Distant land: the worldspace's terrain and object LOD beyond the loaded cells (hills, tree lines, far buildings), as the game draws it past its loaded area. Off: the world ends where the loaded cells end"><input type="checkbox" id="lod" checked> distant land</label>
+      <label title="Cell viewer: the lights the game marks as shadow-casting (spotlights, omni and hemisphere lights) cast shadows, as in the game: up to 8 lights nearest the camera at once, with the shadow resolution and softness of your Fallout4Prefs.ini. Off: placed lights shine through everything"><input type="checkbox" id="lightShadows" checked> shadows from placed lights</label>
+      <label title="Cell viewer, outdoors: the weather's god rays. Sunlight scattered by the air, brighter towards the sun and in fog, with shafts where buildings and trees shade the air, as the game draws them. Off: clear air"><input type="checkbox" id="godrays" checked> light shafts (god rays)</label>
+      <label title="Quality: Ultra is Lightbox at full detail. High, Medium and Low trade detail for speed and video memory on weaker PCs (laptop graphics, 2-4 GB cards): smaller textures, less anti-aliasing, fewer ambient-occlusion samples and lamp shadows, a lower resolution while something moves (full again when still), the idle animation at 30-60 fps. Auto picks one from your GPU and steps down if frames stay slow; textures already loaded keep their size until the place is opened again"><span class="k">Quality</span><select id="quality"><option value="auto">Auto</option><option value="ultra">Ultra</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></label>
+      <label title="TAA (temporal anti-aliasing) is the game's own default: each frame is drawn shifted by a fraction of a pixel and blended with the frames before it, so edges, thin straps and shiny parts stop crawling, and a still picture refines itself into a 16-sample supersample. MSAA smooths geometry edges only, in one frame, and keeps the picture sharpest (the default). TAA is experimental: fast-moving parts can leave a faint trail"><span class="k">Anti-aliasing</span><select id="aa"><option value="msaa">MSAA ×4</option><option value="taa4">TAA + MSAA ×4 (experimental)</option><option value="taa">TAA, as the game (experimental)</option></select></label>
+      <details class="adv"><summary><span id="advIcon"></span>Advanced: tonemap, view, screenshot size</summary>
+      <label><span class="k">Tonemap</span><select id="tonemap"><option value="0">game curve</option><option value="1">Reinhard</option><option value="2">none (clamp)</option></select></label>
+      <label><span class="k">View</span><select id="debug"><option value="0">lit</option><option value="1">albedo</option><option value="2">normals</option><option value="3">spec (R) / gloss (G)</option><option value="4">emission</option><option value="5">sun shadow</option><option value="9">ambient occlusion</option><option value="10">light shafts</option></select></label>
+      <label><span class="k">Screenshot</span><select id="shotScale"><option value="1">1x</option><option value="2" selected>2x</option><option value="3">3x</option></select></label>
+      </details>
+    </section>
+
+    <section class="fold" id="secPlugin">
+      <h2>From a plugin<span class="chev"></span></h2>
+      <div class="search">
+        <span id="itemSearchIcon"></span>
+        <input type="search" id="itemSearch" placeholder="Find an armour record, e.g. combat armor, vault suit" autocomplete="off" spellcheck="false">
+        <div id="itemResults" class="pop" hidden></div>
+      </div>
+      <div id="itemCard" class="itemcard" hidden></div>
+    </section>
+
+    <section class="fold closed" id="compareSec">
+      <h2>Compare with a game screenshot<span class="chev"></span></h2>
+      <div class="foldbody">
+      <label><span class="k">Calibration</span><select id="calib">
+        <option value="">set up a calibration scene…</option>
+        <option value="A">A · Clear 12:00</option><option value="B">B · Overcast 12:00</option>
+        <option value="C">C · Clear 22:00 + shock collar</option><option value="D">D · Clear 07:00</option>
+      </select></label>
+      <div class="note">Calibration: the scenes of the in-game test shots (Vault 111 suit, FOV 55, player facing north; the Mountaineer's Backpack from Backpacks of the Commonwealth when installed). Drop a .png/.jpg screenshot onto the view. Alt+click samples the colour of the viewer and the screenshot at the same spot (5×5 average).</div>
+      <label><span class="k">Overlay</span><input type="range" id="ovOpacity" min="0" max="1" step="0.01" value="0.5"><span class="val" id="ovOpacityV">0.50</span></label>
+      <label><span class="k">Mode</span><select id="ovMode"><option value="normal">onion skin</option><option value="difference">difference</option><option value="split">split (drag line)</option></select></label>
+      <div class="row"><button id="ovHide">hide overlay</button><button id="ovClear">remove</button></div>
+      <div id="probe" class="kv"></div>
+      </div>
+    </section>
+
+    <section class="fold" id="secShapes">
+      <h2>Shapes &amp; materials<span class="chev"></span></h2>
+      <div id="shapes" class="note">Load a NIF.</div>
+    </section>
+
+    <section class="fold" id="secLog">
+      <h2>Log<span class="chev"></span></h2>
+      <div id="log"></div>
+    </section>
+
+  </aside>
+  <div id="splitter" title="Drag to resize the sidebar"></div>
+  <main id="main">
+    <canvas id="view"></canvas>
+    <canvas id="gizmo"></canvas>
+    <button id="showSide" hidden title="Show the sidebar again (View > Layout)"><span id="showSideIcon"></span>Panels</button>
+    <div id="toolbar">
+      <button data-cam="front">Front</button><button data-cam="back">Back</button><button data-cam="left">Left</button>
+      <button data-cam="right">Right</button><button data-cam="three">¾ back</button><button data-cam="top">Top</button>
+      <button data-cam="frame">Frame</button><button class="primary" id="shot">Screenshot</button>
+    </div>
+    <div id="loadBar" hidden><div class="lbl"><span class="nm"></span><span class="ct"></span></div><div class="bar"><i></i></div></div>
+    <img id="overlay" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;pointer-events:none;display:none;opacity:.5">
+    <div id="splitLine" style="position:absolute;top:0;bottom:0;width:2px;background:var(--accent);display:none;cursor:ew-resize"></div>
+    <div id="baSplit" hidden title="Drag: before on the left, after on the right"><i></i><span class="l">Before</span><span class="r">After</span></div>
+    <div id="baBar" hidden>
+      <div class="row"><b>Before / after</b><span class="hint">drag the line · hold <kbd>B</kbd> for before · <kbd>R</kbd> reloads</span>
+        <button class="x" id="baClose" title="Close the comparison (frees the before copies)">✕</button></div>
+      <div class="row"><label title="On: the before side keeps the look from the first reload, so later saves are compared with the original. Off: before is the look just before the last reload"><input type="checkbox" id="baPin"> keep the original as before</label></div>
+      <div id="baList"></div>
+    </div>
+    <div id="viewinfo"><div id="hud"></div><div id="keys"></div></div>
+    <div id="drop">Drop a .nif to open it</div>
+    <div id="toast"></div>
+    <div id="dataNote" hidden><span></span><button class="primary" id="dataNoteReload">Reload</button><button class="x" id="dataNoteClose" title="Dismiss">✕</button></div>
+  </main>
+</div>
+<input type="file" id="settingsInput" accept=".json,application/json" hidden>
+<div id="modal" class="modal" hidden><div class="mbox" role="dialog" aria-modal="true"><button class="mclose" id="modalClose" title="Close"></button><div id="modalBody"></div></div></div>
+
+<template id="tplAbout">
+  <img class="aboutart" src="about.jpg" alt="FO4 Lightbox">
+  <h3>FO4 <b>Lightbox</b></h3>
+  <div class="ver">version <span data-ver>1.1.0</span> · GPL-3.0 · made by Bman</div>
+  <p>A model viewer for Fallout 4 that actually tries to look like the game. Open any mesh from your install, throw it on a body,
+    drop it into a real cell and check it under the game's own weather, time of day and lighting. You can even walk around in it.
+    The sun, shadows, fog and tonemapping were tuned against real in-game screenshots, not eyeballed.</p>
+  <p>Nothing from Bethesda ships with this. Every mesh, texture, weather and cell gets read straight out of your own Fallout 4 folder
+    while it runs.</p>
+  <h4>Credits and thanks</h4>
+  <p class="thanks">FO4 Lightbox stands on the work of a lot of generous people: modders who mapped Fallout 4's file formats and gave their tools away, researchers who published the methods it draws with, and players who tried it and told us what broke. Thank you, every one of you.</p>
+  <h5>Modding tools and file formats</h5>
+  <ul class="credits">
+    <li><b>The <a href="https://github.com/niftools" target="_blank" rel="noopener noreferrer">NifTools</a> team</b>: <a href="https://github.com/niftools/nifxml" target="_blank" rel="noopener noreferrer">nif.xml</a>, the community's map of the NIF format that Lightbox's mesh reader follows, and <a href="https://github.com/niftools/nifskope" target="_blank" rel="noopener noreferrer">NifSkope</a>. Thanks also to jonwd7 for NifSkope's Fallout 4 renderer, and to hexabits and Candoran2 for its <a href="https://github.com/hexabits/nifskope" target="_blank" rel="noopener noreferrer">development builds</a>.</li>
+    <li><b>ousnius</b>: <a href="https://github.com/ousnius/BodySlide-and-Outfit-Studio" target="_blank" rel="noopener noreferrer">BodySlide and Outfit Studio</a>, the <a href="https://github.com/ousnius/nifly" target="_blank" rel="noopener noreferrer">nifly</a> NIF library and the <a href="https://github.com/ousnius/Material-Editor" target="_blank" rel="noopener noreferrer">Material Editor</a>, whose BGSM / BGEM layouts Lightbox's material reader follows.</li>
+    <li><b>Bad Dog</b>: <a href="https://github.com/BadDogSkyrim/PyNifly" target="_blank" rel="noopener noreferrer">PyNifly</a>. Its Fallout 4 animation reader ships unchanged inside Lightbox, so the reference body can play any HKX clip, and PyNifly is what Lightbox's NIF reader was checked against.</li>
+    <li><b>Dagobaking</b>: the spline decompression of Fallout 4 animations (skyrim-fo4-animation-conversion) that PyNifly's reader is based on.</li>
+    <li><b>PredatorCZ</b>: <a href="https://github.com/PredatorCZ/HavokLib" target="_blank" rel="noopener noreferrer">HavokLib</a>, the Havok format library underneath that decompression.</li>
+    <li><b>ElminsterAU, Sharlikran, Zilav, Hlp and the xEdit team</b>: <a href="https://github.com/TES5Edit/TES5Edit" target="_blank" rel="noopener noreferrer">xEdit</a> / <a href="https://www.nexusmods.com/fallout4/mods/2737" target="_blank" rel="noopener noreferrer">FO4Edit</a>. Lightbox's plugin, weather and cell readers were checked against its record definitions, value by value.</li>
+    <li><b>fo76utils</b>: the <a href="https://github.com/fo76utils/nifskope" target="_blank" rel="noopener noreferrer">NifSkope fork</a> and <a href="https://github.com/fo76utils/fo76utils" target="_blank" rel="noopener noreferrer">fo76utils</a>. Their open Fallout 4 shader was the cross-check for Lightbox's materials and shader animation.</li>
+    <li><b>MANOLOV02</b>: <a href="https://www.nexusmods.com/fallout4/mods/108129" target="_blank" rel="noopener noreferrer">Nif Explorer</a>, <a href="https://github.com/MANOLOV02/FO4_Base_Library" target="_blank" rel="noopener noreferrer">FO4_Base_Library</a>, <a href="https://www.nexusmods.com/fallout4/mods/94884" target="_blank" rel="noopener noreferrer">Wardrobe Manager</a> and <a href="https://www.nexusmods.com/fallout4/mods/105008" target="_blank" rel="noopener noreferrer">NPC Manager</a>. Their documented findings on the game's image space and weather records were a valuable cross-check.</li>
+    <li><b>The <a href="https://www.modorganizer.org/" target="_blank" rel="noopener noreferrer">Mod Organizer 2</a> team</b> (<a href="https://github.com/ModOrganizer2/modorganizer" target="_blank" rel="noopener noreferrer">source</a>): Lightbox reads your MO2 profile straight from its files.</li>
+    <li><b>The <a href="https://openmw.org/" target="_blank" rel="noopener noreferrer">OpenMW</a> team</b>: their open engine documents how this engine family moves the sun across the sky.</li>
+  </ul>
+  <h5>Rendering research</h5>
+  <p class="cnote">Each one written fresh from the published method:</p>
+  <ul class="credits">
+    <li><b>John Hable</b>: the filmic "Uncharted 2" tonemap curve the game uses (<a href="https://filmicworlds.com/blog/filmic-tonemapping-operators/" target="_blank" rel="noopener noreferrer">Filmic Tonemapping Operators</a>, 2010).</li>
+    <li><b>Morgan McGuire, Michael Mara and David Luebke</b>: <a href="https://research.nvidia.com/publication/2012-06_scalable-ambient-obscurance" target="_blank" rel="noopener noreferrer">Scalable Ambient Obscurance</a> (2012), the game's default ambient occlusion.</li>
+    <li><b>Brian Karis</b>: <a href="https://advances.realtimerendering.com/s2014/" target="_blank" rel="noopener noreferrer">High-Quality Temporal Supersampling</a> (SIGGRAPH 2014), the temporal anti-aliasing.</li>
+    <li><b>Marco Salvi</b>: <a href="https://developer.download.nvidia.com/gameworks/events/GDC2016/msalvi_temporal_supersampling.pdf" target="_blank" rel="noopener noreferrer">An Excursion in Temporal Supersampling</a> (GDC 2016), the variance clipping that keeps TAA from ghosting.</li>
+    <li><b>Matt Pettineo</b>: <a href="https://gist.github.com/TheRealMJP/c83b8c0f46b63f3a88a5986f4fa982b1" target="_blank" rel="noopener noreferrer">Catmull-Rom filtering in a few bilinear taps</a>, the sharp history read of the TAA.</li>
+    <li><b>Yusuke Tokuyoshi and Anton Kaplanyan</b>: <a href="https://doi.org/10.1145/3306131.3317026" target="_blank" rel="noopener noreferrer">Improved Geometric Specular Antialiasing</a> (I3D 2019), the "smooth shiny highlights" option.</li>
+    <li><b>Ola Olsson, Markus Billeter and Ulf Assarsson</b>: <a href="https://research.chalmers.se/en/publication/161725" target="_blank" rel="noopener noreferrer">Clustered Deferred and Forward Shading</a> (HPG 2012), how thousands of placed lights light a cell.</li>
+    <li><b>Matthias Müller, Bruno Heidelberger, Marcus Hennix and John Ratcliff</b>: <a href="https://diglib.eg.org/items/deb0a7a1-2ddf-496f-889a-fe0df1feeb73" target="_blank" rel="noopener noreferrer">Position Based Dynamics</a> (2006), the method of the cloth solver.</li>
+    <li><b>The classics the game's own shading is built from</b>: <a href="https://en.wikipedia.org/wiki/Oren%E2%80%93Nayar_reflectance_model" target="_blank" rel="noopener noreferrer">Oren-Nayar</a> diffuse (1994), <a href="https://en.wikipedia.org/wiki/Blinn%E2%80%93Phong_reflection_model" target="_blank" rel="noopener noreferrer">Blinn-Phong</a> (1977) and <a href="https://en.wikipedia.org/wiki/Specular_highlight#Cook%E2%80%93Torrance_model" target="_blank" rel="noopener noreferrer">Cook-Torrance</a> (1982) highlights, <a href="https://en.wikipedia.org/wiki/Schlick%27s_approximation" target="_blank" rel="noopener noreferrer">Schlick's Fresnel</a> (1994), <a href="https://history.siggraph.org/learning/rendering-fur-with-three-dimensional-textures-by-kajiya-and-kay" target="_blank" rel="noopener noreferrer">Kajiya-Kay</a> hair (1989), <a href="https://en.wikipedia.org/wiki/Henyey%E2%80%93Greenstein_phase_function" target="_blank" rel="noopener noreferrer">Henyey-Greenstein</a> (1941) and <a href="https://en.wikipedia.org/wiki/Rayleigh_scattering" target="_blank" rel="noopener noreferrer">Rayleigh</a> scattering, <a href="https://en.wikipedia.org/wiki/Shadow_mapping" target="_blank" rel="noopener noreferrer">shadow mapping</a> (Lance Williams, 1978) with percentage-closer filtering (Reeves, Salesin and Cook, 1987), <a href="https://en.wikipedia.org/wiki/Halton_sequence" target="_blank" rel="noopener noreferrer">Halton</a> jitter (1960) and <a href="https://en.wikipedia.org/wiki/Catmull%E2%80%93Rom_spline" target="_blank" rel="noopener noreferrer">Catmull-Rom</a> splines (1974).</li>
+  </ul>
+  <h5>Bug reports</h5>
+  <ul class="credits">
+    <li><b>NeinGaming</b>: found Lightbox's first real bug (the endless reload under Mod Organizer 2) and suggested a manual reload. Both made it into 1.1.0.</li>
+    <li><b>stalkerVlad1</b>: found that the animation search gave no sign of life (an empty box opened nothing, a failed search stayed silent). Fixed in 1.1.0.</li>
+  </ul>
+  <h5>Made by</h5>
+  <ul class="credits">
+    <li><b>Bman</b>: the idea, the direction and every design call, plus hours of in-game calibration screenshots, so Lightbox is measured against the real game instead of eyeballed. Made for Backpacks of the Commonwealth.</li>
+    <li>Written with <b>Claude</b> (Anthropic).</li>
+  </ul>
+</template>
+
+<template id="tplControls">
+  <h3>Controls</h3>
+  <h4>Camera</h4>
+  <div class="ktable">
+    <span>drag</span><span>look around</span>
+    <span>right drag, <kbd>Shift</kbd> + drag</span><span>pan</span>
+    <span>wheel</span><span>zoom</span>
+    <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span>fly</span>
+    <span><kbd>Q</kbd> / <kbd>E</kbd></span><span>down / up</span>
+    <span><kbd>Shift</kbd></span><span>fly faster</span>
+  </div>
+  <h4>Game mode (<kbd>G</kbd>)</h4>
+  <div class="ktable">
+    <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span>move, relative to the camera</span>
+    <span><kbd>Space</kbd></span><span>jump, hold to fly</span>
+    <span><kbd>Shift</kbd></span><span>sprint</span>
+    <span><kbd>Caps Lock</kbd></span><span>walk / run</span>
+    <span><kbd>G</kbd> / <kbd>Esc</kbd></span><span>leave</span>
+  </div>
+  <h4>Files</h4>
+  <div class="ktable">
+    <span>drop a .nif</span><span>opens it (its textures still come from the game)</span>
+    <span>drop a screenshot</span><span>overlays it for comparing (Compare panel)</span>
+    <span><kbd>Alt</kbd> + click</span><span>samples the viewer and the screenshot at the same spot</span>
+    <span><kbd>R</kbd></span><span>reloads the textures, materials and meshes you changed; the old look stays as "before"</span>
+    <span><kbd>B</kbd> (hold)</span><span>shows only "before" while comparing; drag the line to move the split</span>
+  </div>
+</template>
+
+<script>
+// Live update: when the server restarts, a file under web/ changes or the game data does (a plugin saved in the CK /
+// FO4Edit, an archive packed again), and then stays unchanged for one more check, the page saves its scene (main.js
+// lightboxSnapshot), reloads and puts the scene back, the open cell read again. With View > "Reload when game files
+// change" off (localStorage lightbox.autoreload = 0), or when the server paused its checks because files kept
+// "changing", game-data changes only show a notice with a Reload button. A plain script, so it still works if a
+// half-finished main.js update fails to load.
+(function () {
+  if (new URLSearchParams(location.search).has('capture')) return;
+  let base = null, pending = null, baseCode = null;
+  const auto = () => { try { return localStorage.getItem('lightbox.autoreload') !== '0'; } catch (e) { return true; } };
+  function reloadNow(reason) {
+    try {
+      if (window.lightboxSnapshot) sessionStorage.setItem('lightbox.snapshot', JSON.stringify(window.lightboxSnapshot()));
+      sessionStorage.setItem('lightbox.reloadReason', reason);
+    } catch (e) { /* storage blocked */ }
+    location.reload();
+  }
+  window.lightboxReloadNow = reloadNow;
+  const note = document.getElementById('dataNote');
+  let dismissed = '';
+  function showNote(text) {
+    if (!text || text === dismissed) { note.hidden = true; return; }
+    note.querySelector('span').textContent = text;
+    note.hidden = false;
+  }
+  document.getElementById('dataNoteReload').onclick = async () => {
+    try { await fetch('/api/reload', { cache: 'no-store' }); } catch (e) { /* reload anyway */ }
+    reloadNow('data');
+  };
+  document.getElementById('dataNoteClose').onclick = () => { dismissed = note.querySelector('span').textContent; note.hidden = true; };
+  async function poll() {
+    let v = null;
+    try { v = await (await fetch('/api/version', { cache: 'no-store' })).json(); } catch (e) { /* server restarting */ }
+    if (v && v.boot) {
+      const code = v.boot + '|' + v.web, k = code + '|' + (v.data || '');
+      if (base === null) { base = k; baseCode = code; }
+      else if (k !== base) {
+        if (code === baseCode && !auto()) {          // game data only, reloading by hand: say so
+          base = k;
+          showNote('Game files changed on disk.');
+        } else if (pending === k || code === baseCode) {
+          // page files: wait one more check (an edit may be half written); game data: the server already waited
+          reloadNow(code === baseCode ? 'data' : 'code');
+          return;
+        } else pending = k;
+      }
+      if (v.paused) showNote(`Game files keep changing on disk (${v.paused}); automatic reload is paused.`);
+    }
+    setTimeout(poll, 1500);
+  }
+  setTimeout(poll, 1500);
+})();
+</script>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

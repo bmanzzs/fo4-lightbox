@@ -1224,3 +1224,14 @@ minutes). The page puts the file in place of the loaded models (the body and wha
 File > Open .nif files with Lightbox (open_with) adds or removes HKCU\Software\Classes entries: the ProgID
 FO4Lightbox.nif, .nif\OpenWithProgids and Applications\FO4 Lightbox.exe (this user, no admin). Windows leaves
 the default app to the user (Open with > Always use this app).
+
+## Right-click menu, and a server that survives sleep (2026-10-10)
+
+- A right click on the view (no drag: a right drag still pans) selects like a left click, then main.js
+  openCtxMenu offers Hide .nif and Delete .nif for the selected model (Hide body / Delete body for any part of the
+  reference body, as its Scene row does). Delete takes the model out of the scene only. #ctxMenu reuses .mdrop.
+- Bman saw "127.0.0.1 refused to connect" now and then. The server stops itself when no page has asked for 180 s
+  (--exit-when-idle); after the PC slept, the first check after waking counted the sleep and stopped it before the
+  page could ask, and the launcher took that stop as the end. Now exit_when_idle does not count time this thread
+  spent far past its tick (the PC was asleep), and the launcher starts the server again on the same port while its
+  window is open (up to 5 times): the page sees a new boot, reloads and puts the scene back.

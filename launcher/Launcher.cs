@@ -190,14 +190,28 @@ static class Launcher
         ui.Done();
         if (server == null) return 0;                      // a viewer that was already running keeps running
 
-        // wait for the window to close (or the server to stop), then stop the server
+        // wait for the window to close, then stop the server. A server that stops while the window is still open (its
+        // idle stop after the PC slept, a crash) starts again on the same port: the page reloads and puts the scene
+        // back instead of ending on "127.0.0.1 refused to connect"
+        int restarts = 0;
         while (true)
         {
             if (server.HasExited)
             {
-                if (server.ExitCode != 0)
-                    Fail("The viewer's server stopped unexpectedly.\n\n" + LastLines(Tail(), 12) + "\n\nThe whole log: " + logPath);
-                return 0;
+                if (window.HasExited) return 0;
+                if (++restarts > 5)
+                {
+                    if (server.ExitCode != 0)
+                        Fail("The viewer's server stopped unexpectedly.\n\n" + LastLines(Tail(), 12) + "\n\nThe whole log: " + logPath);
+                    return 0;
+                }
+                server = StartServer(port, game, pass);
+                if (server == null || WaitReady(server, port) != "ready")
+                {
+                    Fail("The viewer's server stopped and could not start again.\n\n" + LastLines(Tail(), 12) + "\n\nThe whole log: " + logPath);
+                    return 1;
+                }
+                continue;
             }
             if (window.WaitForExit(500)) break;
         }

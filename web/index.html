@@ -70,6 +70,10 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
 .mdrop .mi .ic { width: 14px; height: 14px; }
 .mdrop button:hover .mi { color: var(--accent); }
 .mdrop hr { border: 0; border-top: 1px solid var(--line); margin: 4px 3px; }
+/* the view's right-click menu (main.js openCtxMenu): a dropdown placed at the cursor */
+#ctxMenu { position: fixed; top: 0; left: 0; min-width: 150px; z-index: 60; }
+#ctxMenu .ctxname { padding: 4px 10px 5px; color: var(--dim); font-size: 11px; max-width: 240px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; border-bottom: 1px solid var(--line); margin-bottom: 3px; }
 .mdrop .mlabel { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--dim); padding: 5px 10px 2px; }
 .mdrop .mnote { font-size: 11px; color: var(--dim); padding: 4px 10px 4px 28px; }
 #modsMenu .mdrop { min-width: 262px; }
@@ -850,6 +854,7 @@ body.capture #dataNote { display: none !important; }
   setTimeout(poll, 1500);
 })();
 </script>
+<div id="ctxMenu" class="mdrop" hidden></div>
 <script type="module" src="js/main.js"></script>
 </body>
 </html>

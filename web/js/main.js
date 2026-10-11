@@ -1322,15 +1322,56 @@ cv.addEventListener('pointerdown', e => {
   drag = { x: e.clientX, y: e.clientY, pan: e.button === 2 || e.button === 1 || e.shiftKey, x0: e.clientX, y0: e.clientY, t0: performance.now(), button: e.button };
   cv.setPointerCapture(e.pointerId);
 });
-// a single left click (no drag) selects the model under the cursor (its edges are outlined, its file is named in the HUD);
-// a click on nothing clears the selection
+// a single left or right click (no drag) selects the model under the cursor (its edges are outlined, its file is named
+// in the HUD; a right click then opens the menu below); a click on nothing clears the selection
 cv.addEventListener('pointerup', e => {
   const d = drag;
   if (d && d.gizmo) { gizmo.end(); return; }
-  if (!d || d.button !== 0 || e.shiftKey || Math.hypot(e.clientX - d.x0, e.clientY - d.y0) > 4 || performance.now() - d.t0 > 450) return;
+  if (!d || (d.button !== 0 && d.button !== 2) || e.shiftKey || Math.hypot(e.clientX - d.x0, e.clientY - d.y0) > 4 ||
+      performance.now() - d.t0 > 450) return;
   const r = cv.getBoundingClientRect();
   try { R.setSelection(R.pick(e.clientX - r.left, e.clientY - r.top)); } catch (err) { console.warn('pick:', err); }
+  if (d.button === 2) openCtxMenu(e.clientX, e.clientY);
 });
+
+// ------------------------------------------------------------------------------------------------ right-click menu
+// A right click (no drag: dragging with the right button still pans) selects like a left click, then offers Hide and
+// Delete for the selected model (the whole body for any part of the reference body, as its Scene row). Delete takes it
+// out of the scene only: Lightbox never changes a file.
+const ctx = $('ctxMenu');
+function closeCtxMenu() { ctx.hidden = true; }
+function openCtxMenu(x, y) {
+  const s = R.selection;
+  const list = !s || s.kind !== 'model' ? [] : s.model.refBody ? R.models.filter(m => m.refBody) : [s.model];
+  if (!list.length) { closeCtxMenu(); return; }
+  const m = list[0], body = !!m.refBody;
+  ctx.innerHTML = '';
+  const head = document.createElement('div');
+  head.className = 'ctxname'; head.textContent = body ? 'Reference body' : m.name.split('\\').pop();
+  ctx.append(head);
+  const item = (label, title, fn) => {
+    const b = document.createElement('button');
+    b.textContent = label; b.title = title;
+    b.onclick = () => { closeCtxMenu(); fn(); };
+    ctx.append(b);
+  };
+  item(body ? 'Hide body' : 'Hide .nif', 'Hide it (its eye in the Scene list shows it again)', () => {
+    for (const x of list) x.visible = false;
+    R.setSelection(null); refreshModels(); R.version++;
+  });
+  item(body ? 'Delete body' : 'Delete .nif', 'Take it out of the scene (the file itself is not touched)', () => {
+    R.setSelection(null);
+    if (body) { setRef('', ''); return; }
+    R.removeModel(m); state.refModels = state.refModels.filter(r => r !== m); refreshModels(); R.scheduleSweep();
+  });
+  ctx.hidden = false;
+  ctx.style.left = `${Math.max(4, Math.min(x, innerWidth - ctx.offsetWidth - 4))}px`;
+  ctx.style.top = `${Math.max(4, Math.min(y, innerHeight - ctx.offsetHeight - 4))}px`;
+}
+window.addEventListener('pointerdown', e => { if (!ctx.hidden && !ctx.contains(e.target)) closeCtxMenu(); }, true);
+window.addEventListener('keydown', e => { if (e.key === 'Escape') closeCtxMenu(); });
+window.addEventListener('blur', closeCtxMenu);
+cv.addEventListener('wheel', closeCtxMenu, { passive: true });
 cv.addEventListener('pointerup', () => drag = null);
 cv.addEventListener('pointermove', e => {
   if (drag && drag.gizmo) { const [x, y] = viewXY(e); gizmo.move(x, y, e.ctrlKey); return; }

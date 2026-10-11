@@ -1265,10 +1265,17 @@ def ask_game_dir():
 
 def exit_when_idle(srv, seconds):
     """Stop the server once no page has asked anything for `seconds` (the window was closed). An open page asks
-    every 1.5 s, and still about once a minute while its window is minimised."""
+    every 1.5 s, and still about once a minute while its window is minimised. Time the PC spent asleep does not count:
+    on waking, the page has had no chance to ask yet."""
+    tick = min(5.0, seconds / 4)
+    last = time.monotonic()
     while True:
-        time.sleep(min(5.0, seconds / 4))
-        if time.monotonic() - State.last_request > seconds:
+        time.sleep(tick)
+        now = time.monotonic()
+        if now - last > tick * 3:                # this thread slept far longer than asked: the PC was asleep
+            State.last_request = now
+        last = now
+        if now - State.last_request > seconds:
             print(f'  no page has been open for {seconds:.0f} s: stopping', flush=True)
             srv.shutdown()
             return

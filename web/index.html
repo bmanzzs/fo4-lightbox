@@ -274,6 +274,9 @@ kbd { font: 10px var(--mono); border: 1px solid #3a4048; border-bottom-width: 2p
 #cellRadius #bdGrid:disabled { opacity: .35; }
 #cellRadius #evenLight { flex: .55; display: flex; align-items: center; justify-content: center; padding: 0; }
 #evenLight .ic { width: 15px; height: 15px; }
+#cellRadius #collView { flex: .55; display: flex; align-items: center; justify-content: center; padding: 0; }
+#collView .ic { width: 15px; height: 15px; }
+#collView.on { color: #5fd2ff; }
 #evenLight.on .ic path:nth-child(2) { fill: rgba(255, 214, 120, .55); }
 #evenLight.on { color: #ffd678; }
 /* NifSkope's corner axes sit where the view info starts: move it aside while they show */
@@ -578,6 +581,7 @@ body.capture #dataNote { display: none !important; }
         <button data-r="0">1 cell</button><button data-r="1" class="on">3×3</button><button data-r="2">5×5</button>
         <button id="bdGrid" class="on" title="Grid: NifSkope's floor grid and corner axes on the black or grey background">grid</button>
         <button id="evenLight" title="Even light, like NifSkope and Outfit Studio: one light from the camera and the same light from every side, so every part is lit wherever you look. No shadows, ambient occlusion, light shafts, fog or colour grading. Click again for the weather's light"></button>
+        <button id="collView" title="Collision: draws the Havok collision the models carry, as game mode and dropped items use it. Blue: the cell's (near the view's centre), green: the loaded models' own, orange: items dropped with physics. Right-click a model: Drop with physics"></button>
       </div>
       <button class="wide play" id="gameBtn" title="Walk your character (reference body + everything it wears) through the scene: G or Esc to leave">
         <span class="pi">▶</span> <span id="gameBtnText">Play as character</span> <kbd>G</kbd></button>
@@ -749,7 +753,7 @@ body.capture #dataNote { display: none !important; }
 <template id="tplAbout">
   <img class="aboutart" src="about.jpg" alt="FO4 Lightbox">
   <h3>FO4 <b>Lightbox</b></h3>
-  <div class="ver">version <span data-ver>1.1.0</span> · GPL-3.0 · made by Bman</div>
+  <div class="ver">version <span data-ver>1.2.0</span> · GPL-3.0 · made by Bman</div>
   <p>A model viewer for Fallout 4 that actually tries to look like the game. Open any mesh from your install, throw it on a body,
     drop it into a real cell and check it under the game's own weather, time of day and lighting. You can even walk around in it.
     The sun, shadows, fog and tonemapping were tuned against real in-game screenshots, not eyeballed.</p>
@@ -761,7 +765,7 @@ body.capture #dataNote { display: none !important; }
   <ul class="credits">
     <li><b>The <a href="https://github.com/niftools" target="_blank" rel="noopener noreferrer">NifTools</a> team</b>: <a href="https://github.com/niftools/nifxml" target="_blank" rel="noopener noreferrer">nif.xml</a>, the community's map of the NIF format that Lightbox's mesh reader follows, and <a href="https://github.com/niftools/nifskope" target="_blank" rel="noopener noreferrer">NifSkope</a>. Thanks also to jonwd7 for NifSkope's Fallout 4 renderer, and to hexabits and Candoran2 for its <a href="https://github.com/hexabits/nifskope" target="_blank" rel="noopener noreferrer">development builds</a>.</li>
     <li><b>ousnius</b>: <a href="https://github.com/ousnius/BodySlide-and-Outfit-Studio" target="_blank" rel="noopener noreferrer">BodySlide and Outfit Studio</a>, the <a href="https://github.com/ousnius/nifly" target="_blank" rel="noopener noreferrer">nifly</a> NIF library and the <a href="https://github.com/ousnius/Material-Editor" target="_blank" rel="noopener noreferrer">Material Editor</a>, whose BGSM / BGEM layouts Lightbox's material reader follows.</li>
-    <li><b>Bad Dog</b>: <a href="https://github.com/BadDogSkyrim/PyNifly" target="_blank" rel="noopener noreferrer">PyNifly</a>. Its Fallout 4 animation reader ships unchanged inside Lightbox, so the reference body can play any HKX clip, and PyNifly is what Lightbox's NIF reader was checked against.</li>
+    <li><b>Bad Dog</b>: <a href="https://github.com/BadDogSkyrim/PyNifly" target="_blank" rel="noopener noreferrer">PyNifly</a>. Its Fallout 4 animation reader ships unchanged inside Lightbox, so the reference body can play any HKX clip, and PyNifly is what Lightbox's NIF reader was checked against. Its documented Havok collision layouts are what Lightbox's collision reader follows.</li>
     <li><b>Dagobaking</b>: the spline decompression of Fallout 4 animations (skyrim-fo4-animation-conversion) that PyNifly's reader is based on.</li>
     <li><b>PredatorCZ</b>: <a href="https://github.com/PredatorCZ/HavokLib" target="_blank" rel="noopener noreferrer">HavokLib</a>, the Havok format library underneath that decompression.</li>
     <li><b>ElminsterAU, Sharlikran, Zilav, Hlp and the xEdit team</b>: <a href="https://github.com/TES5Edit/TES5Edit" target="_blank" rel="noopener noreferrer">xEdit</a> / <a href="https://www.nexusmods.com/fallout4/mods/2737" target="_blank" rel="noopener noreferrer">FO4Edit</a>. Lightbox's plugin, weather and cell readers were checked against its record definitions, value by value.</li>

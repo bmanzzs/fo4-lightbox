@@ -1,5 +1,5 @@
 // FO4 Lightbox front end: UI wiring, camera controls, weather -> lighting environment.
-import { Renderer, defaultEnv, setDataGeneration } from './renderer.js';
+import { Renderer, defaultEnv, setDataGeneration, refMatrix } from './renderer.js';
 import { vec3 } from './math.js';
 import { envFromWeather, AMBIENT } from './weather.js';
 import { CAT_ICONS, UI_ICONS, POSE_ICONS, ANIM_ICONS } from './icons.js';
@@ -11,6 +11,7 @@ import { CellLoader, clearCellMemo } from './world.js';
 import { TIERS, TIER_LABEL, STEP_DOWN_MS, classify, gpuName } from './quality.js';
 import { PLACES, placeView, findCell, clearFoundCells, renderPlaceThumbs } from './places.js';
 import { GameMode, SPEED } from './game.js';
+import { Physics } from './physics.js';
 import { Gizmo } from './gizmo.js';
 import { mat4 } from './math.js';
 
@@ -500,7 +501,7 @@ function refreshModels() {
     d.append(cb, n, tag, ...resetXform(body), x); el.append(d);
   }
   for (const m of R.models) {
-    if (m.refBody) continue;
+    if (m.refBody || m.role === 'door') continue;           // (an opened door's copy belongs to the cell)
     const d = document.createElement('div'); d.className = 'm';
     const cb = eyeToggle(d, () => m.visible, (v) => { m.visible = v; });
     const n = document.createElement('span'); n.className = 'n'; n.textContent = m.name.split('\\').pop(); n.title = `${m.name}\nsource: ${m.source}${m.mod ? ` (Mod Organizer 2 mod "${m.mod}")` : ''}`;
@@ -880,16 +881,25 @@ const game = new GameMode(R, api, {
   sex: () => state.refSex || 'm',
 });
 window.lightboxGame = game;
+// physics (physics.js): game mode on the models' own collision, items dropped with physics, the collision view
+const physics = new Physics(R, api, cells);
+game.physics = physics;
+window.lightboxPhysics = physics;
 async function toggleGame() {
   if (game.on) {
     game.exit();
+    physics.setCharacter(false);
     // back to the pose the slider shows (game mode left its own in-place clip playing), with that pose's treadmill
     if (state.poseId === 'clip' && state.clipPath) playClip(state.clipPath, /forward|walk|run|jog|sprint/i.test(state.clipPath), null, true);
     else playPose(state.poseId ?? '', true);
     R.treadSpeed = clipTreadSpeed(state.poseId === 'clip' ? state.clipPath : state.poseId);
   } else {
     if (!state.refSex) await setRef('m', state.refOutfit);     // someone has to wear it
+    try {
+      await physics.ensure(); physics.syncStatics(); physics.setCharacter(true);
+    } catch (e) { log('physics: ' + e.message + ' (game mode uses depth probes)', true); }
     try { await game.enter(); } catch (e) { log('game mode: ' + e.message, true); toast('Game mode failed: ' + e.message, 5000); }
+    if (!game.on) physics.setCharacter(false);
   }
   R.treadmill = !game.on;          // game mode moves the character for real: cloth needs no treadmill then
   $('gameBtn').classList.toggle('on', game.on);
@@ -901,7 +911,7 @@ $('gameBtn').onclick = () => { $('gameBtn').blur(); toggleGame(); };
 // the controls, at the bottom of the view
 function showKeys() {
   $('keys').innerHTML = game.on
-    ? '<b>Game mode</b> · <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>Space</kbd> jump (hold to fly) · <kbd>Shift</kbd> sprint · <kbd>Caps Lock</kbd> walk / run · drag: camera · wheel: zoom · <kbd>G</kbd> / <kbd>Esc</kbd> leave'
+    ? '<b>Game mode</b> · <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>Space</kbd> jump (hold to fly) · <kbd>Shift</kbd> sprint · <kbd>Caps Lock</kbd> walk / run · <kbd>E</kbd> doors · <kbd>F</kbd> throw the .nif · drag: camera · wheel: zoom · <kbd>G</kbd> / <kbd>Esc</kbd> leave'
     : '<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> fly · <kbd>Q</kbd> / <kbd>E</kbd> down / up · <kbd>Shift</kbd> faster · drag: look · wheel: zoom · <kbd>G</kbd> play as character';
 }
 showKeys();
@@ -920,6 +930,8 @@ window.addEventListener('keydown', (e) => {
     keys.add('space');
   }
   if (k === 'g' && !e.repeat) toggleGame();
+  if (k === 'f' && game.on && !e.repeat) throwItem();
+  if (k === 'e' && game.on && !e.repeat) useDoor();
   if (e.key === 'Escape' && game.on) toggleGame();
 });
 window.addEventListener('keyup', (e) => {
@@ -927,6 +939,122 @@ window.addEventListener('keyup', (e) => {
   if (e.code === 'Space') { keys.delete('space'); if (game.on) e.preventDefault(); }
 });
 window.addEventListener('blur', () => keys.clear());      // keys released while another window had the focus
+// Doors (game mode, E): the door in reach in front of the character opens or closes with the NIF's own Open / Close
+// sequence, played on a copy of it placed where the door stands while the placed one is hidden; its collision is off
+// while it is open. A load door (XTEL) takes the character through: the destination door's cell opens and the
+// character stands where the load door says, facing its way. Doors in the game also include display cases and levers.
+const doors = new Map();             // reference id -> { m, open, r }
+let doorsOf = null, doorBusy = false;
+function doorList() { return (cells.data && cells.data.refs || []).filter(r => r.door && r.model); }
+function doorInReach() {
+  const P = R.playerPos, h = R.playerHeading, f = [-Math.sin(h), Math.cos(h)];
+  let best = null;
+  for (const r of doorList()) {
+    const dx = r.pos[0] - P[0], dy = r.pos[1] - P[1], d = Math.hypot(dx, dy);
+    if (d > 200 || Math.abs(r.pos[2] - P[2] - 60) > 170) continue;
+    const ahead = (dx * f[0] + dy * f[1]) / (d || 1);
+    if (ahead < -0.1 && d > 60) continue;
+    const score = d * (1.8 - ahead);
+    if (!best || score < best.score) best = { r, score };
+  }
+  return best && best.r;
+}
+function clearDoors() {
+  for (const d of doors.values()) R.removeModel(d.m);
+  doors.clear();
+  doorsOf = cells.data;
+}
+async function useDoor() {
+  if (!game.on || doorBusy) return;
+  if (doorsOf !== cells.data) clearDoors();
+  const r = doorInReach();
+  if (!r) { toast('No door in reach', 1200); return; }
+  doorBusy = true;
+  try {
+    if (r.tel) await goThrough(r);
+    else await toggleDoor(r);
+  } catch (e) { toast(`${r.edid || 'Door'}: ${e.message}`, 4000); log('door: ' + e.message, true); }
+  finally { doorBusy = false; }
+}
+async function toggleDoor(r) {
+  let d = doors.get(r.ref);
+  if (!d) {
+    const tpl = R.cellTemplates.find(t => t.items && t.items.includes(r));
+    const sc = await api(`nif?path=${encodeURIComponent(r.model)}${r.swap ? `&swap=${r.swap}` : ''}&placed=1`);
+    if (!(sc.sequences || []).some(q => /^open/i.test(q.name))) { toast(`${r.edid || 'This door'} does not open (no Open animation)`, 2500); return; }
+    const m = R.addModel(sc, { role: 'door' });
+    m.fixedWorld = refMatrix(r.pos, r.rot, r.rot2, r.scale || 1);
+    m.activeSeq = null;
+    // the moving parts: the nodes the Open sequence animates and everything under them (their collision lets go)
+    const moved = new Set((m.sequences.find(q => /^open/i.test(q.name))?.channels || []).map(c => (c.node || '').toLowerCase()).filter(Boolean));
+    const byBlock = new Map([...m.nodes.values()].map(n => [n.block, n]));
+    const parts = new Set();
+    for (const n of m.nodes.values()) {
+      for (let x = n, k = 0; x && k < 64; x = byBlock.get(x.parent), k++) if (moved.has((x.name || '').toLowerCase())) { parts.add((n.name || '').toLowerCase()); break; }
+    }
+    d = { m, open: false, r, parts };
+    doors.set(r.ref, d);
+    if (tpl) R.hideInstance(tpl, r, true);
+  }
+  d.open = !d.open;
+  d.m.activeSeq = d.m.sequences.find(q => (d.open ? /^open/i : /^close/i).test(q.name)) || d.m.activeSeq;
+  d.m.seqStart = R.time;
+  physics.setRefSolid(r.ref, !d.open, d.parts);
+  R.version++;
+}
+async function goThrough(r) {
+  const t = r.tel;
+  toast('Going through the door…', 6000);
+  const dest = await api(`door?ref=${t.ref}&pos=${t.pos.join(',')}`);
+  game.frozen = true;
+  const h = -t.rot[2];                                         // as a COC marker's heading (server esm_world _spawn)
+  R.setPlayer(t.pos, h);                                       // there at once, while the cell loads around it
+  try {
+    await openCell({ formid: dest.cell, name: dest.name, edid: dest.edid });
+    clearDoors();
+    game.place(t.pos[0], t.pos[1], t.pos[2], h, 30);
+    const c = R.camera;
+    c.yaw = h - Math.PI / 2; c.pan = [0, 0, 0]; c.pitch = 0.2;
+    c.target = [R.playerPos[0], R.playerPos[1], R.playerPos[2] + 105];
+    toast(dest.name || dest.edid || dest.cell, 2500);
+  } finally { game.frozen = false; }
+}
+function doorPrompt() {
+  if (!game.on) return '';
+  const r = doorInReach();
+  return r ? `\n[E] ${r.tel ? 'go through' : doors.get(r.ref)?.open ? 'close' : 'open'} · ${r.edid || 'door'}` : '';
+}
+
+// physics: drop a model where it is, or throw it from in front of the character (game mode, F)
+async function dropItem(m, opts) {
+  const name = m.name.split('\\').pop();
+  try {
+    const r = await physics.drop(m, opts);
+    toast(r.ok ? `${name}: dropped with physics (${r.mass.toFixed(1)} kg${r.dynamic ? '' : ', no moving body in the file: its shapes fall as one'}); Reset puts it back`
+      : `${name}: ${r.why}`, 3500);
+  } catch (e) { toast(`${name}: physics failed: ${e.message}`, 5000); log('physics: ' + e.message, true); }
+}
+function throwItem() {
+  const m = R.models.find(x => x.role === 'main' && x.visible && physics.canDrop(x));
+  if (!m) { toast('Nothing to throw: load a .nif with collision (an item or a ground model)', 3000); return; }
+  const h = R.playerHeading, f = [-Math.sin(h), Math.cos(h)];          // the character faces +Y, turned by its heading
+  const M = Float32Array.from(R.playerRoot);
+  M[12] += f[0] * 55; M[13] += f[1] * 55; M[14] += 95;
+  dropItem(m, { from: M, lift: 0, v: [f[0] * 420, f[1] * 420, 160] });
+}
+$('collView').innerHTML = UI_ICONS.collision;
+$('collView').onclick = async () => {
+  $('collView').blur();
+  const on = !physics.show;
+  $('collView').classList.toggle('on', on);
+  try { await physics.setShow(on); } catch (e) {
+    toast('Collision view failed: ' + e.message, 5000); log('physics: ' + e.message, true);
+    $('collView').classList.remove('on'); return;
+  }
+  R.version++;
+  if (on) toast('Collision: blue the cell\'s, green the loaded models\' own, orange items dropped with physics', 3500);
+};
+
 function moveCamera(dt) {
   if (keys.size) R.poke();                       // the camera (or the character) is being moved: dynamic resolution
   if (game.on) { game.update(dt, keys); return; }
@@ -1399,6 +1527,8 @@ function openCtxMenu(x, y) {
     for (const x of list) R.setModelXform(x, null);
     refreshModels();
   }, list.some(x => x.xf));
+  item('Drop with physics', 'Let it fall with its own Havok collision (and roll, tip over, settle); Reset puts it back. ' +
+    'In game mode F throws it', () => dropItem(m), !body && physics.canDrop(m));
   item(body ? 'Delete body' : 'Delete .nif', 'Take it out of the scene (the file itself is not touched)', () => {
     R.setSelection(null);
     if (body) { setRef('', ''); return; }
@@ -2029,6 +2159,8 @@ function loop(now) {
     if (timeAcc > 0.1) { setHour(state.hour + timeAcc / rate, true); timeAcc = 0; }
   }
   moveCamera(dt);
+  try { physics.tick(dt); } catch (e) { console.error(e); }
+  if (doors.size && doorsOf !== cells.data) clearDoors();    // another cell: the opened doors' copies go
   // (a frame held back by the GPU queue or the tier's animation cap keeps its time: the next frame advances by it)
   let drew = false, held = false;
   pendDt += dt;
@@ -2055,7 +2187,9 @@ function loop(now) {
   const t = (selName ? `\u25b8 ${selName}${gz ? `  ${gz}` : ''}\n` : '') + `${R.env.name || ''}  ${hourText(state.hour)}\n` +
     `exposure ×${R.exposureValue().toFixed(3)}  scene lum ${st.avgLum?.toFixed(3) ?? '-'}  ${drew || held ? fps.toFixed(0) + ' fps' : 'idle'}` +
     (R.qualityName !== 'ultra' ? `  quality ${TIER_LABEL[R.qualityName]}${quality.pref === 'auto' ? ' (auto)' : ''}` : '') +
-    (R.cellMode ? `  ${R.stats_draws ?? 0} draws` : '') + (game.on ? `\nGAME MODE · ${game.state}` : '');
+    (R.cellMode ? `  ${R.stats_draws ?? 0} draws` : '') + (game.on ? `\nGAME MODE · ${game.state}${doorPrompt()}` : '') +
+    (physics.active ? `\nphysics · ${physics.status.models ? `${physics.status.done}/${physics.status.models} models · ` : ''}` +
+      `${physics.status.colliders.toLocaleString()} shapes${physics.items.size ? ` · ${physics.items.size} dropped` : ''}` : '');
   if (t !== hudText) {
     hudText = t;
     const lines = t.split('\n').map(l => l.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])));
@@ -2141,7 +2275,7 @@ function collectSettings() {
     app: 'FO4 Lightbox', version: 1,
     layout: { ...ui, folds: Object.fromEntries(foldable().map(sec => [sec.id, sec.classList.contains('closed')])) },
     render: { fov: +$('fov').value, exposureAuto: !!R.settings.exposureAuto, ev: +$('ev').value, bloom: $('bloom').checked,
-      grade: $('grade').checked, lut: $('lut').checked, specAA: $('specAA').checked, ao: $('ao').checked, decals: $('decals').checked, particles: $('particles').checked, lod: $('lod').checked, lightShadows: $('lightShadows').checked, godrays: $('godrays').checked, aa: $('aa').value, tonemap: $('tonemap').value, view: $('debug').value,
+      grade: $('grade').checked, lut: $('lut').checked, specAA: $('specAA').checked, ao: $('ao').checked, decals: $('decals').checked, particles: $('particles').checked, lod: $('lod').checked, lightShadows: $('lightShadows').checked, godrays: $('godrays').checked, aa: $('aa').value, aaV: 2, tonemap: $('tonemap').value, view: $('debug').value,
       screenshot: $('shotScale').value, shadows: !!R.settings.shadows, floor: !!R.settings.ground, quality: quality.pref },
     environment: { weather: state.weatherIndex < 0 ? 'studio' : state.presets[state.weatherIndex]?.edid, hour: state.hour,
       sunAz: +$('sunAz').value, timeRate: +$('timeRate').value },
@@ -2165,7 +2299,9 @@ function applySettings(s, opts = {}) {
   const r = s.render || {};
   setControl('fov', r.fov); setControl('ev', r.ev);
   if ('exposureAuto' in r) setExposureMode(!!r.exposureAuto);
-  setControl('bloom', r.bloom, 'change'); setControl('grade', r.grade, 'change'); setControl('lut', r.lut, 'change'); setControl('specAA', r.specAA, 'change'); setControl('ao', r.ao, 'change'); setControl('decals', r.decals, 'change'); setControl('particles', r.particles, 'change'); setControl('lod', r.lod, 'change'); setControl('lightShadows', r.lightShadows, 'change'); setControl('godrays', r.godrays, 'change'); setControl('aa', r.aa, 'change');
+  setControl('bloom', r.bloom, 'change'); setControl('grade', r.grade, 'change'); setControl('lut', r.lut, 'change'); setControl('specAA', r.specAA, 'change'); setControl('ao', r.ao, 'change'); setControl('decals', r.decals, 'change'); setControl('particles', r.particles, 'change'); setControl('lod', r.lod, 'change'); setControl('lightShadows', r.lightShadows, 'change'); setControl('godrays', r.godrays, 'change');
+  // (aaV 2: settings saved since MSAA x4 became the default; earlier dev builds saved TAA, which stays a choice)
+  setControl('aa', r.aaV >= 2 ? r.aa : 'msaa', 'change');
   setControl('quality', r.quality, 'change'); setControl('tonemap', r.tonemap, 'change'); setControl('debug', r.view, 'change'); setControl('shotScale', r.screenshot, 'change');
   if ('shadows' in r) R.settings.shadows = !!r.shadows;
   if ('floor' in r) R.settings.ground = !!r.floor;

@@ -663,6 +663,26 @@ void main() {
   o = uColor;
 }`;
 
+// the collision view (physics.js): line lists in world space, one colour each; lines behind the scene drawn faint
+export const COLL_VS = COMMON + FRAME + `
+layout(location=0) in vec3 aPos;
+out float vViewZ;
+void main() {
+  vec4 vp = uView * vec4(aPos, 1.0);
+  vViewZ = -vp.z;
+  gl_Position = uProj * vp;
+}`;
+export const COLL_FS = COMMON + FRAME + `
+in float vViewZ;
+uniform sampler2D uSceneDepth;
+uniform vec4 uColor;
+out vec4 o;
+void main() {
+  float zn = texelFetch(uSceneDepth, ivec2(gl_FragCoord.xy * uRes.xy), 0).r * 2.0 - 1.0;
+  float sceneZ = 2.0 * uScreen.z * uScreen.w / (uScreen.w + uScreen.z - zn * (uScreen.w - uScreen.z));
+  o = vec4(uColor.rgb, uColor.a * (vViewZ > sceneZ * 1.004 + 1.5 ? 0.22 : 1.0));
+}`;
+
 // game mode: depth of the nearest surface in a small orthographic view (ground under the feet, wall ahead)
 export const PROBE_FS = COMMON + `
 in vec2 vUV;

@@ -80,6 +80,7 @@ export const ANIM_ICONS = {
 };
 
 export const UI_ICONS = {
+  collision: svg('<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5" stroke-dasharray="2 2"/>'),
   bulb: svg('<path d="M9.2 17.2h5.6M10 20.2h4"/><path d="M12 2.8a6 6 0 0 0-3.7 10.7c.7.6 1 1.3 1 2.1v1.6h5.4v-1.6c0-.8.3-1.5 1-2.1A6 6 0 0 0 12 2.8z"/>'
     + '<path d="M10.3 6.6a2.7 2.7 0 0 1 1.9-.9" stroke-width="1.4"/>', 'bulb'),
   search: svg('<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/>'),

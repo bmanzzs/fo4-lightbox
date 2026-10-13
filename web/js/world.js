@@ -31,7 +31,7 @@ export class CellLoader {
   unload() {
     this.token++;
     this.R.clearCell();
-    this.info = null; this.interiorEnv = null; this.spawn = null; this.focus = null;
+    this.info = null; this.data = null; this.interiorEnv = null; this.spawn = null; this.focus = null;
     this.lodTemplates = [];      // freed with the cell (their JS data would stay alive until the next exterior's LOD)
     this.R.scheduleSweep();      // the cell's textures are unused now (renderer sweepTextures)
   }
@@ -56,6 +56,7 @@ export class CellLoader {
     this.lodTemplates = [];
     R.cellMode = true;
     this.info = c.cell;
+    this.data = c;               // the references and the landscape (physics.js builds the cell's collision from them)
     // an interior flagged Use Sky Lighting (the viewer's Simple scene) is lit by the weather like an exterior
     this.interiorEnv = c.cell.interior && !c.cell.sky ? interiorEnv(c.lighting, c.imagespace) : null;
 

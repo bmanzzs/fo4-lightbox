@@ -357,6 +357,50 @@ class WorldDB:
                 return c
         raise KeyError('cell %r not found' % key)
 
+    # ---- load doors ----------------------------------------------------------------------------------------
+    def door_cell(self, ref):
+        """The cell a load door's destination door stands in (for an exterior, the grid cell under where the player
+        appears): { cell, edid, name, interior }. Load doors are persistent references, so the persistent children of
+        every cell are searched first (a few tenths of a second), then the rest; answers are kept."""
+        ref = int(str(ref), 16)
+        memo = self.__dict__.setdefault('_door_memo', {})
+        if ref in memo:
+            return memo[ref]
+        with self.lock, self.files():
+            found = None
+            for want in (8, 9):
+                for c in self.cells.values():
+                    for p, s, e in c['children']:
+                        if self._group_has(p, s, e, ref, want):
+                            found = c
+                            break
+                    if found:
+                        break
+                if found:
+                    break
+        if found is None:
+            raise KeyError('door %08X not found' % ref)
+        out = {'cell': '%08X' % found['fid'], 'edid': found['edid'], 'name': found['name'], 'interior': found['interior'],
+               'world': '%08X' % found['world'] if found.get('world') else None}
+        memo[ref] = out
+        return out
+
+    def _group_has(self, p, start, end, ref, want):
+        """Whether a cell's children group (its type `want` subgroup: 8 persistent, 9 temporary) holds REFR `ref`."""
+        d, pos = p.map(), start
+        while pos + 24 <= end:
+            sig, size, flags, raw = _REC(d, pos)
+            if sig == b'GRUP':
+                gtype = _I32(d, pos + 12)[0]
+                if gtype == want and self._group_has(p, pos + 24, pos + size, ref, -1):
+                    return True
+                pos += size
+                continue
+            if want == -1 and sig == b'REFR' and p.global_fid(raw) == ref:
+                return True
+            pos += 24 + size
+        return False
+
     # ---- one cell -------------------------------------------------------------------------------------------
     def cell(self, key, radius=1):
         """Placed objects (with their model), landscape and lighting of a cell; exteriors include the
@@ -532,6 +576,9 @@ class WorldDB:
                                 r['xpdd'] = struct.unpack_from('<2f', v)
                             elif k == 'XPRM' and len(v) >= 12:                         # primitive box (half sizes)
                                 r['xprm'] = struct.unpack_from('<3f', v)
+                            elif k == 'XTEL' and len(v) >= 28:                         # load door: the door it leads to,
+                                r['xtel'] = (p.global_fid(struct.unpack_from('<I', v)[0]),  # where the player appears
+                                             list(struct.unpack_from('<6f', v, 4)))
                         refs[fid] = r
             elif sig == b'LAND' and lands is not None:
                 _, flags, raw, body = _record(d, pos)
@@ -586,6 +633,11 @@ class WorldDB:
                 item['swap'] = '%08X' % sw
             if sig == b'LIGH':
                 item['light'] = self._light(subs, r, p)
+            if sig == b'DOOR':                     # game mode opens it (E); a load door (XTEL) leads to another cell
+                item['door'] = True
+                if r.get('xtel') and r['xtel'][0]:
+                    t = r['xtel']
+                    item['tel'] = {'ref': '%08X' % t[0], 'pos': t[1][:3], 'rot': t[1][3:]}
             return [item]
         if sig == b'SCOL':
             return self._scol_parts(r, p, subs) or ['nomodel']

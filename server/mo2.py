@@ -308,6 +308,19 @@ def instance_folder(path):
     return None
 
 
+def home_instance():
+    """The instance whose mods folder this viewer was installed into (MO2 puts a mod in <instance>\\mods\\<mod>), or
+    None."""
+    p = os.path.dirname(os.path.abspath(__file__))
+    while True:
+        up = os.path.dirname(p)
+        if up == p:
+            return None
+        if os.path.basename(up).lower() == 'mods' and os.path.isfile(os.path.join(os.path.dirname(up), 'ModOrganizer.ini')):
+            return os.path.dirname(up)
+        p = up
+
+
 def find_instances(extra=()):
     """(Fallout 4 instances, the instance folder MO2 started this viewer from or None). extra: instance folders the
     user added by hand."""
@@ -317,6 +330,9 @@ def find_instances(extra=()):
         started = _instance_of_exe(exe)
         if started:
             folders.append(started)
+    home = home_instance()
+    if home:
+        folders.append(home)                      # (installed with MO2 and started outside it: still found)
     base = os.path.join(_local(), 'ModOrganizer')
     try:
         for n in sorted(os.listdir(base), key=str.lower):

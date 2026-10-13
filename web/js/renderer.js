@@ -198,6 +198,8 @@ export class Renderer {
     this.version++;
   }
   playerWorld(s) {
+    const F = s._model && s._model.fixedWorld;          // a model placed in the world (an opened door, main.js)
+    if (F) return mat4.mul(F, s.world);
     if (!s._player) return s.world;
     const X = s._model && s._model.xform;               // the transform gizmo's move / turn / scale (view only)
     return mat4.mul(this.playerRoot, X ? mat4.mul(X, s.world) : s.world);
@@ -842,6 +844,21 @@ export class Renderer {
     const m = this.addModel(scene, { role: 'cell', template: true });
     this.cellTemplates.push(m);
     return m;
+  }
+  // one placement of a template hidden (an opened door is drawn by a copy that plays its animation): culled everywhere
+  // by an impossible bounding sphere, the batch's flat copies and the shadow maps made again
+  hideInstance(tpl, item, hidden) {
+    const j = (tpl.items || []).indexOf(item);
+    if (j < 0) return false;
+    for (const sh of tpl.shapes) {
+      const b = sh._batch, it = b && b.inst[j];
+      if (!it) continue;
+      if (hidden && !(it.radius < 0)) { it._r = it.radius; it.radius = -1e9; }
+      else if (!hidden && it.radius < 0) it.radius = it._r;
+      b._fn = -1;
+    }
+    this.casterEpoch(); this.version++;
+    return true;
   }
   get instanceCount() { let n = 0; for (const b of this.batches) n += b.inst.length; return n; }
   // §22 projected decals of the cell (server esm_world: placed TXST references). Each: { base, edid, pos, rot, scale,
@@ -3103,11 +3120,12 @@ export class Renderer {
       this.u4f(t, 'uAxes', [st.grid ? 1 : 0, Math.min(w / 10, 125), 0, 0]);
     }
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-    if (this.selection) {
+    if (this.selection || this.collisionLines) {
       // the outline is drawn after TAA, where no history averages the sub-pixel jitter away: the plain projection
       // (fillFrame writes the whole block again next frame)
       gl.bindBuffer(gl.UNIFORM_BUFFER, this.frameUbo); gl.bufferSubData(gl.UNIFORM_BUFFER, FR.proj * 4, this._last.proj);
-      this.drawSelection(w, h);
+      if (this.collisionLines) this.drawCollision(w, h);
+      if (this.selection) this.drawSelection(w, h);
     }
     gl.bindVertexArray(null); this._vao = null;
     this._mark(null);
@@ -3224,6 +3242,38 @@ export class Renderer {
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, s._wireIB); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, arr, gl.STATIC_DRAW);
     s._wireCount = arr.length;
   }
+  // the collision view (physics.js): [{ pos: Float32Array of line ends (world, game units), color }]; each list's
+  // buffer is kept while the list object is the same one
+  drawCollision(w, h) {
+    const gl = this.gl, sets = this.collisionLines.filter(s => s && s.pos && s.pos.length >= 6);
+    if (!this.progs.coll) this.progs.coll = this.program(S.COLL_VS, S.COLL_FS, 'coll', {}, { uSceneDepth: 6 });
+    const keep = new Set(sets);
+    for (const [s, buf] of this._collBufs || []) if (!keep.has(s)) { gl.deleteBuffer(buf); this._collBufs.delete(s); }
+    this._collBufs = this._collBufs || new Map();
+    if (!sets.length) return;
+    if (!this._collVao) this._collVao = gl.createVertexArray();
+    const p = this.progs.coll;
+    gl.viewport(0, 0, w, h);
+    this.setDepthTest(false); this.setCull(false); this.setBlend(true, gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    this.bindUnit(6, this.sceneDepth);
+    this.useProg(p);
+    gl.bindVertexArray(this._collVao); this._vao = this._collVao;
+    gl.enableVertexAttribArray(0);
+    for (const s of sets) {
+      let buf = this._collBufs.get(s);
+      if (!buf) {
+        buf = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, s.pos, gl.STATIC_DRAW);
+        this._collBufs.set(s, buf);
+      } else gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+      this.u4f(p, 'uColor', s.color);
+      gl.drawArrays(gl.LINES, 0, s.pos.length / 3);
+    }
+    gl.bindVertexArray(null); this._vao = null;
+    this.setBlend(false);
+  }
+
   drawSelection(w, h) {
     const gl = this.gl, list = this.selectionDraws();
     if (!list.length) return;

@@ -94,6 +94,19 @@ def _gog_installs():
     return out
 
 
+def _own_install():
+    """The game this viewer was installed into by a mod manager (Vortex puts it in <game>\\Data\\Tools\\FO4 Lightbox),
+    or None."""
+    p = os.path.dirname(os.path.abspath(__file__))
+    while True:
+        up = os.path.dirname(p)
+        if up == p:
+            return None
+        if os.path.basename(p).lower() == 'data' and os.path.isfile(os.path.join(p, 'Fallout4.esm')):
+            return up
+        p = up
+
+
 def find_game_dir(explicit=None):
     """Return the Fallout 4 game folder (the one that contains Data), or None."""
     cands = []
@@ -101,6 +114,9 @@ def find_game_dir(explicit=None):
         cands.append(explicit)
     if os.environ.get('FO4_DATA'):
         cands.append(os.path.dirname(os.path.normpath(os.environ['FO4_DATA'])))
+    own = _own_install()
+    if own:
+        cands.append(own)
     reg = _registry_install()
     if reg:
         cands.append(reg)

@@ -1,7 +1,9 @@
 // Game mode: the reference body and everything it wears walks through the loaded cell like the player does.
 // Third-person camera behind the character, movement relative to the camera, walk / run / sprint clips with a short
-// crossfade, jumps with the game's take-off / fall / landing clips, ground following and wall stops from small depth
-// probes of the cell (no Havok: an approximation). Holding Space after a jump keeps lifting the character (flying).
+// crossfade, jumps with the game's take-off / fall / landing clips. With physics (physics.js, the default) the character
+// is a capsule in the models' own Havok collision: walls, steps, slopes, stair helpers, invisible walls, items it
+// pushes; without it (the engine not loaded yet), ground following and wall stops come from small depth probes of the
+// drawn cell. Holding Space after a jump keeps lifting the character (flying).
 export const SPEED = { walk: 90, run: 350.9, sprint: 500 };    // Fallout4.esm MOVT Player_1HM_MT, forward (units/s)
 const CLIP = { walk: 'walk', run: 'run', sprint: 'sprint' };
 const STEP = 45;            // highest ledge the character steps onto (and the largest drop it sticks to the ground over)
@@ -25,6 +27,7 @@ export class GameMode {
     this.on = false; this.clips = {}; this.state = ''; this.vz = 0; this.walk = false;
     this.air = false; this.airTime = 0; this.stateTime = 0; this.jumpKind = 'still'; this.moving = false;
     this.lastGround = null;
+    this.physics = null;          // physics.js (main.js sets it): used once its world exists
   }
 
   async clip(id) {
@@ -102,7 +105,7 @@ export class GameMode {
   }
 
   update(dt, keys) {
-    if (!this.on || dt <= 0) return;
+    if (!this.on || dt <= 0 || this.frozen) return;      // (frozen: going through a load door)
     const R = this.R, c = R.camera, cell = R.cellMode;
     const pos = [...R.playerPos];
     let heading = R.playerHeading;
@@ -138,6 +141,8 @@ export class GameMode {
     // (if nothing stops it; a stopped step ends at least RADIUS short of the wall, outside the ground probe's box)
     // and the line from the character back to the camera. Outside a cell the floor is flat at height 0.
     let hit = null, g = 0, camHit = null;
+    const P = this.physics;
+    if (P && P.ready && P.charOn) return this.updatePhysics(dt, pos, heading, dir, step, z, flying, mode, back);
     if (cell) {
       const px = dir ? pos[0] + dir[0] * step : pos[0], py = dir ? pos[1] + dir[1] * step : pos[1];
       const probes = [R.groundProbe(px, py, this.air ? z + 20 : pos[2] + STEP), R.rayProbe(c.target, back, this.wantDist)];
@@ -177,12 +182,50 @@ export class GameMode {
         if (!landing) this.setState(this.moving ? mode : 'idle');
       }
     }
+    this.finish(dt, pos, heading, camHit);
+  }
+  // the character stands at pos; the camera follows the chest, smoothly, pulled in by walls (camHit)
+  finish(dt, pos, heading, camHit) {
+    const R = this.R, c = R.camera;
     R.setPlayer(pos, heading);
-    // the camera follows the chest, smoothly
     const want = [pos[0], pos[1], pos[2] + 105], k = 1 - Math.exp(-dt * 14);
     c.target = c.target.map((v, i) => v + (want[i] - v) * k);
     c.pan = [0, 0, 0];
     c.dist = camHit == null ? this.wantDist : Math.max(25, camHit - 12);
     this.setDist = c.dist;
+  }
+
+  // the same, moved by the character controller (physics.js): the wanted step and fall in, where it ends and whether it
+  // stands out
+  updatePhysics(dt, pos, heading, dir, step, z, flying, mode, back) {
+    const R = this.R, c = R.camera, P = this.physics;
+    const dz = this.air ? z - pos[2] : -Math.max(2, GRAVITY * dt * dt);      // on the ground: pressed onto it
+    const r = P.moveCharacter(pos, [dir ? dir[0] * step : 0, dir ? dir[1] * step : 0, dz], this.air);
+    const out = r.pos;
+    if (this.air) {
+      if (this.vz > 0 && out[2] - pos[2] < dz * 0.5) this.vz = 0;               // a ceiling stops the climb
+      if (r.grounded && this.vz <= 0) {
+        this.vz = 0; this.air = false;
+        this.setState('land');
+      } else {
+        const start = this.clipFor(JUMPS[this.jumpKind][0]);
+        this.setState(!flying && this.state === 'jump' && start && this.stateTime < start.duration ? 'jump' : 'fall');
+        if (this.lastGround && out[2] < this.lastGround[2] - 5000) {              // fell out of the world: back
+          out.splice(0, 3, ...this.lastGround); this.vz = 0; this.air = false; this.setState('idle');
+        }
+      }
+    } else if (r.grounded) {
+      this.lastGround = [...out];
+    } else {
+      this.air = true; this.vz = 0; this.airTime = FLY_AFTER; this.jumpKind = this.moving ? (this.walk ? 'walk' : 'run') : 'still';
+      this.setState('fall');
+    }
+    if (!this.air) {
+      const land = this.clipFor(JUMPS[this.jumpKind][2]);
+      const landing = this.state === 'land' && !this.moving && land && this.stateTime < land.duration;
+      if (!landing) this.setState(this.moving ? mode : 'idle');
+    }
+    const head = [out[0], out[1], out[2] + 105];
+    this.finish(dt, out, heading, P.castRay(head, back, this.wantDist));
   }
 }

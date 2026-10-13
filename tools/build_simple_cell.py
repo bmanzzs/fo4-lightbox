@@ -18,6 +18,9 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+# compiled caches of the viewer's modules go to %LOCALAPPDATA%, never next to the code (see server/app.py)
+sys.pycache_prefix = sys.pycache_prefix or os.path.join(os.environ.get('LOCALAPPDATA') or os.path.expanduser('~'),
+                                                        'FO4 Lightbox', 'pycache')
 sys.path.insert(0, os.path.join(ROOT, 'server'))
 from fo4paths import find_game_dir                  # noqa: E402
 from esm_weather import _Plugin, _subrecords, _cstr  # noqa: E402

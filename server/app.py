@@ -19,16 +19,22 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+# the compiled caches of the viewer's own modules go to %LOCALAPPDATA%\FO4 Lightbox\pycache, never next to the code: a
+# mod manager may have put the viewer in the game's Data\Tools folder, and the viewer writes nothing there
+sys.pycache_prefix = sys.pycache_prefix or os.path.join(os.environ.get('LOCALAPPDATA') or os.path.expanduser('~'),
+                                                        'FO4 Lightbox', 'pycache')
 sys.path.insert(0, HERE)
 from fo4paths import find_game_dir, sao_settings, shadow_settings        # noqa: E402
 from fileshare import Stale, stamp                       # noqa: E402
 from vfs import VFS, ArchiveView, lookup_scope, norm     # noqa: E402
 from scene import build_scene                            # noqa: E402
+import collision                                         # noqa: E402
+from fo4nif import Nif                                   # noqa: E402
 from materials import read_material                      # noqa: E402
 
 WEB = os.path.join(os.path.dirname(HERE), 'web')
 SCENE_DIR = os.path.join(os.path.dirname(HERE), 'scenes')
-VERSION = '1.1.0'
+VERSION = '1.2.0'
 BOOT = '%.3f' % time.time()        # changes on every server start: open pages reload themselves (live update)
 # gzip level of JSON answers and SceneCache entries: level 2 makes a cold Sanctuary's models + LOD ~2 % larger than 5
 # at about half the compression time (the answer waits for it); the page gets the same JSON bytes either way
@@ -750,6 +756,17 @@ def open_with_state():
         return dict(on=False, exe=os.path.isfile(os.path.join(APP_DIR, 'FO4 Lightbox.exe')))
 
 
+
+def collision_of(raw, placed):
+    """A NIF's collision bodies (collision.nif_collision); placed: drawn at a cell reference, where (as build_scene)
+    the reference places the root and the root's own transform is not used."""
+    nif = Nif(raw)
+    if placed:
+        for r in nif.roots:
+            if 0 <= r < nif.nblocks and 'local' in nif.blocks[r]:
+                nif.blocks[r]['local'] = collision.np.eye(4)
+    return collision.nif_collision(nif)
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
 
@@ -850,6 +867,8 @@ class Handler(BaseHTTPRequestHandler):
             body = self.rfile.read(n)
             if u.path == '/api/nif':
                 return self.send(200, build_scene(body, State.vfs, q.get('name', 'dropped.nif')))
+            if u.path == '/api/collision':              # a dropped / imported NIF's collision
+                return self.send(200, collision_of(body, False))
             if u.path == '/api/devsave':                # calibration helper; only when started with --save-dir
                 if not State.save_dir:
                     return self.error(403, 'saving is off (start the server with --save-dir <folder>)')
@@ -1067,6 +1086,13 @@ class Handler(BaseHTTPRequestHandler):
             # material swaps come from a plugin: a cached scene with swaps is only good for the index it was read from
             return self.send_scene(('nif', norm(path), vanilla, q.get('swap', ''), State.world_gen if W else 0, placed,
                                     cut), build)
+        if ep == 'collision':                       # a NIF's Havok collision as plain shapes (game mode, physics)
+            path = q['path']
+            placed = q.get('placed') == '1'
+
+            def build(rec):
+                return collision_of(rec.read(path), placed)
+            return self.send_scene(('collision', norm(path), placed), build)
         if ep == 'armors':
             W = world()
             if not W:
@@ -1126,6 +1152,23 @@ class Handler(BaseHTTPRequestHandler):
                     out['imagespace'] = State.weather.get_imagespace(lt['imagespace'])
                 except Exception as e:
                     out['imagespace_error'] = str(e)
+            return self.send(200, out)
+        if ep == 'door':                            # a load door's destination: the cell its door stands in
+            W = world()
+            if not W:
+                return self.error(503, State.world_error or 'world index not ready')
+            try:
+                out = W.door_cell(q['ref'])
+            except KeyError as e:
+                return self.error(404, str(e))
+            # an exterior destination: the grid cell under where the player appears (the door itself is a persistent
+            # reference of the worldspace's persistent cell)
+            pos = [float(v) for v in q.get('pos', '').split(',') if v] if q.get('pos') else None
+            if not out['interior'] and pos and len(pos) >= 2 and out.get('world'):
+                g = W.grid.get((int(out['world'], 16), int(pos[0] // 4096), int(pos[1] // 4096)))
+                if g is not None:
+                    gc = W.cells[g]
+                    out = dict(out, cell='%08X' % g, edid=gc['edid'] or out['edid'], name=gc['name'] or out['name'])
             return self.send(200, out)
         if ep == 'sky':
             return self.send(200, sky_profile())
@@ -1230,16 +1273,22 @@ def bind(port):
     sys.exit(1)
 
 
-# the install, when it had to be typed in once (not found by itself): asked in the console, kept next to the viewer
-GAME_FILE = os.path.join(os.path.dirname(HERE), 'game_path.txt')
+# the install, when it had to be typed in once (not found by itself): asked in the console and kept in settings_dir(),
+# the file the launcher keeps the folder picked in its dialog in. Up to 1.1.0 the console kept it next to the viewer.
+GAME_FILE = os.path.join(settings_dir(), 'game_path.txt')
+OLD_GAME_FILE = os.path.join(os.path.dirname(HERE), 'game_path.txt')
 
 
 def remembered_game():
-    try:
-        with open(GAME_FILE, encoding='utf-8') as f:
-            return f.readline().strip() or None
-    except OSError:
-        return None
+    for p in (GAME_FILE, OLD_GAME_FILE):
+        try:
+            with open(p, encoding='utf-8') as f:
+                g = f.readline().strip()
+            if g:
+                return g
+        except OSError:
+            pass
+    return None
 
 
 def ask_game_dir():
@@ -1254,6 +1303,7 @@ def ask_game_dir():
         game = find_game_dir(p) if p else None          # (nothing else is found: the search before came up empty)
         if game:
             try:
+                os.makedirs(settings_dir(), exist_ok=True)
                 with open(GAME_FILE, 'w', encoding='utf-8') as f:
                     f.write(game + '\n')
             except OSError:

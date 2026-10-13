@@ -55,6 +55,7 @@ static class Launcher
     static int Main(string[] args)
     {
         try { SetProcessDPIAware(); } catch (Exception) { }
+        try { SetCurrentProcessExplicitAppUserModelID(AppId); } catch (Exception) { }    // one button with the window
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         WebRequest.DefaultWebProxy = null;                   // local requests only: skip the proxy lookup
@@ -186,14 +187,17 @@ static class Launcher
             return 0;                                      // the server stops by itself once the page is closed
         }
         WaitForWindow(window);
+        StampWindows(window);
         ui.Set(1, "Ready");
         ui.Done();
+        // the next seconds too: the window may only appear (or be made again) once the page loads
+        for (int i = 0; i < 20; i++) { Thread.Sleep(250); StampWindows(window); }
         if (server == null) return 0;                      // a viewer that was already running keeps running
 
         // wait for the window to close, then stop the server. A server that stops while the window is still open (its
         // idle stop after the PC slept, a crash) starts again on the same port: the page reloads and puts the scene
         // back instead of ending on "127.0.0.1 refused to connect"
-        int restarts = 0;
+        int restarts = 0, ticks = 0;
         while (true)
         {
             if (server.HasExited)
@@ -214,6 +218,7 @@ static class Launcher
                 continue;
             }
             if (window.WaitForExit(500)) break;
+            if (++ticks % 4 == 0) StampWindows(window);    // (cheap when stamped; catches a window Edge made again)
         }
         Stop(server);
         return 0;
@@ -392,10 +397,106 @@ static class Launcher
             return true;
         }, IntPtr.Zero);
         if (found == IntPtr.Zero) return false;
+        Stamp(found);                                         // (a window from before 1.2.0, or one Edge made again)
         if (IsIconic(found)) ShowWindow(found, 9);            // SW_RESTORE
         SetForegroundWindow(found);
         return true;
     }
+
+    // ------------------------------------------------------------------------------------------- the taskbar button
+    // An Edge / Chrome app window carries the browser's AppUserModelID, so Windows put the viewer's window under the
+    // Edge button. The launcher stamps the window's property store (SHGetPropertyStoreForWindow works on another
+    // process's window) with its own ID, plus the relaunch command, name and icon a pin of the window uses; the
+    // launcher process takes the same ID, so the splash, the window and such a pin share one button. The window keeps
+    // the page's favicon (the same cube), so no icon is forced on it. A pin of FO4 Lightbox.exe made before 1.2.0 has
+    // no ID: unpin it and pin the running window again (README).
+    const string AppId = "FO4Lightbox.Viewer";
+    static readonly Guid AppModelKeys = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3");   // PKEY_AppUserModel_*
+    const uint KeyRelaunchCommand = 2, KeyRelaunchIcon = 3, KeyRelaunchName = 4, KeyId = 5;
+
+    // every top-level window of the browser process the launcher started; if that process handed the window to a
+    // browser that was already running on the profile, the window still showing the page's first title
+    static void StampWindows(Process browser)
+    {
+        uint pid = 0;
+        try { if (!browser.HasExited) pid = (uint)browser.Id; } catch (Exception) { }
+        EnumWindows((h, l) =>
+        {
+            if (!IsWindowVisible(h) || GetWindow(h, 4) != IntPtr.Zero) return true;     // (GW_OWNER: menus, popups)
+            uint p;
+            GetWindowThreadProcessId(h, out p);
+            if (pid != 0 ? p == pid : WindowText(h) == Title) Stamp(h);
+            return true;
+        }, IntPtr.Zero);
+    }
+
+    static string WindowText(IntPtr h)
+    {
+        StringBuilder sb = new StringBuilder(512);
+        GetWindowText(h, sb, sb.Capacity);
+        return sb.ToString();
+    }
+
+    // idempotent: a window that already has the ID is left alone (setting it again would make the taskbar redo it)
+    static void Stamp(IntPtr hwnd)
+    {
+        IPropertyStore store = null;
+        try
+        {
+            Guid iid = typeof(IPropertyStore).GUID;
+            if (SHGetPropertyStoreForWindow(hwnd, ref iid, out store) != 0 || store == null) return;
+            if (ReadString(store, KeyId) == AppId) return;
+            string exe = Application.ExecutablePath;
+            // the relaunch properties first, the ID last: the taskbar reads them when the ID changes
+            WriteString(store, KeyRelaunchCommand, Quote(exe));
+            WriteString(store, KeyRelaunchName, Title);
+            WriteString(store, KeyRelaunchIcon, exe + ",0");
+            WriteString(store, KeyId, AppId);
+            store.Commit();
+        }
+        catch (Exception) { }
+        finally { if (store != null) Marshal.ReleaseComObject(store); }
+    }
+
+    static string ReadString(IPropertyStore store, uint pid)
+    {
+        PropertyKey k = new PropertyKey { fmtid = AppModelKeys, pid = pid };
+        PropVariant v;
+        if (store.GetValue(ref k, out v) != 0) return null;
+        try { return v.vt == 31 ? Marshal.PtrToStringUni(v.p) : null; }       // VT_LPWSTR
+        finally { PropVariantClear(ref v); }
+    }
+
+    static void WriteString(IPropertyStore store, uint pid, string value)
+    {
+        PropertyKey k = new PropertyKey { fmtid = AppModelKeys, pid = pid };
+        PropVariant v = new PropVariant { vt = 31, p = Marshal.StringToCoTaskMemUni(value) };
+        try { store.SetValue(ref k, ref v); }
+        finally { PropVariantClear(ref v); }                                    // (frees the string)
+    }
+
+    [ComImport, Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IPropertyStore
+    {
+        [PreserveSig] int GetCount(out uint count);
+        [PreserveSig] int GetAt(uint index, out PropertyKey key);
+        [PreserveSig] int GetValue(ref PropertyKey key, out PropVariant value);
+        [PreserveSig] int SetValue(ref PropertyKey key, ref PropVariant value);
+        [PreserveSig] int Commit();
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 4)]
+    struct PropertyKey { public Guid fmtid; public uint pid; }
+
+    [StructLayout(LayoutKind.Explicit, Size = 24)]                              // a PROPVARIANT holding a pointer
+    struct PropVariant { [FieldOffset(0)] public ushort vt; [FieldOffset(8)] public IntPtr p; }
+
+    [DllImport("shell32.dll")]
+    static extern int SHGetPropertyStoreForWindow(IntPtr hwnd, ref Guid iid, [MarshalAs(UnmanagedType.Interface)] out IPropertyStore store);
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)] static extern int SetCurrentProcessExplicitAppUserModelID(string id);
+    [DllImport("ole32.dll")] static extern int PropVariantClear(ref PropVariant v);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+    [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr hWnd, uint cmd);
 
     delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lParam);

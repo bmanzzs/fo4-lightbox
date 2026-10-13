@@ -20,6 +20,9 @@ import sys
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+# compiled caches of the viewer's modules go to %LOCALAPPDATA%, never next to the code (see server/app.py)
+sys.pycache_prefix = sys.pycache_prefix or os.path.join(os.environ.get('LOCALAPPDATA') or os.path.expanduser('~'),
+                                                        'FO4 Lightbox', 'pycache')
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'server'))
 from fo4paths import find_game_dir      # noqa: E402
 from fo4nif import Nif                  # noqa: E402

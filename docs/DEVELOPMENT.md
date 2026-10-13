@@ -4,7 +4,7 @@ How the viewer is built, what is measured and what is approximated, and the log 
 to the viewer's folder. For using the viewer, see `README.md`.
 
 Started 2026-10-05 for Backpacks of the Commonwealth (Bman). Version 1.0.0 packaged for release on 2026-10-06, 1.1.0 on
-2026-10-07 (see "1.1.0" and "Release package" below).
+2026-10-07, 1.2.0 on 2026-10-11 (see "1.2.0", "1.1.0" and "Release package" below).
 
 ## Run it
 
@@ -574,6 +574,78 @@ the game), MSAA x4 alone).
   them miss (the landscape then read a cube sampler on a 2D unit, and once a removed statement turned the next
   declaration into an if body). A check now logs any replace that misses; both output locations are explicit.
 
+## 1.2.0 (2026-10-11)
+
+1.1.1 never shipped on its own: 1.2.0 is the first update after 1.1.0 and contains it (mod manager install, the trimmed
+runtime, the taskbar button, MSAA for old settings), plus collision and physics (see "Collision and physics" below).
+
+Bman: "could we make it compatible with mod manager download button? like wrap it in fomod" and, on hearing the main
+zip held ~1,560 files, "WHAT?". Then (via the video session) the window's own taskbar button. No change to what the
+viewer draws.
+
+**Taskbar button** (Bman's screenshot: his pinned `FO4 Lightbox.exe` and, next to it, the running window under the
+Edge logo). An Edge / Chrome `--app` window carries the browser's AppUserModelID, so Windows groups it with Edge. The
+launcher now stamps the window's property store (`SHGetPropertyStoreForWindow`, which works on another process's
+window) with `System.AppUserModel.RelaunchCommand` (the launcher exe), `RelaunchDisplayNameResource` ("FO4
+Lightbox"), `RelaunchIconResource` (the exe's icon) and, last, `System.AppUserModel.ID` = `FO4Lightbox.Viewer`; the
+launcher process takes the same ID (`SetCurrentProcessExplicitAppUserModelID`), so splash, window and a pin of the
+window share one button. Which windows: the visible unowned top-level windows of the browser process the launcher
+started (if that process handed the window to a browser already running on the profile: the window still titled
+"FO4 Lightbox"), right after the window appears, every 250 ms for 5 s, then every 2 s while the launcher waits for
+the window to close; `Activate()` (Open with hand-over) stamps the window it brings to the front. Stamping is
+idempotent: a window that already has the ID is left alone. No icon is forced on the window: Edge shows the page's
+favicon (the same cube) and would put it back. A split second of the Edge button remains at start-up, and a pin of
+the exe made before 1.2.0 has no ID: unpin it and pin the running window (README). The properties stay on the
+window until Edge destroys it (the launcher cannot clear them first; a few strings). Checked cross-process with a
+hidden window in a second process (written, read back through a fresh property store, second stamp left alone);
+the taskbar itself is for Bman to see.
+
+**MSAA by default, for old settings too** (Bman, via the video session; the change is that session's, in
+`main.js`). The code default was already MSAA x4, but settings saved by the 10-06 dev builds held `"aa":"taa"`.
+`collectSettings` now saves `aaV: 2` next to `aa`, and `applySettings` takes the saved `aa` only when `aaV >= 2`, else
+MSAA: an old TAA resets once, a TAA picked from now on stays.
+
+**Mod manager install.** Both zips now hold a `fomod` folder next to `FO4 Lightbox` (written by `build_release.py`,
+`fomod()`): `ModuleConfig.xml` has one `requiredInstallFiles` entry, folder `FO4 Lightbox` to `Tools\FO4 Lightbox`.
+A FOMOD can only install inside Data, so Vortex and MO2 put the viewer in `Data\Tools\FO4 Lightbox`, as BodySlide is
+installed; unpacked by hand, the zip gives the same folder as before plus the small `fomod` folder. Inside Data the
+viewer is never read as game data: its loose-file scans only walk the asset folders (`meshes`, `textures`, ...), and
+MO2's index only its INDEXED top folders. To keep "writes nothing to the game folder" true there:
+- Python's caches of the viewer's own modules go to `%LOCALAPPDATA%\FO4 Lightbox\pycache` (`sys.pycache_prefix`,
+  set at the top of `server/app.py`, and in the two tools that import server modules) instead of `__pycache__` next
+  to the code. The bundled runtime's modules ship compiled, so it writes no caches at all.
+- `game_path.txt` (the folder typed into the console when the game isn't found) moved from the viewer's folder to
+  `%LOCALAPPDATA%\FO4 Lightbox`, the file the launcher already used; the old location is still read.
+- Checked by a simulated install (scratch `FakeGame\Data\Tools\FO4 Lightbox`, trimmed runtime): a server run that
+  served the page and loaded the weather left the install's files exactly as they were; the cache went to
+  `%LOCALAPPDATA%`.
+Found from where it's installed: `fo4paths._own_install()` (the game whose `Data` holds the viewer, tried after
+`--game` / `FO4_DATA` and before the registry) and `mo2.home_instance()` (the MO2 instance whose `mods` folder holds
+it, added to the instances found even when MO2 didn't start the viewer). Not run through MO2's virtual Data: it reads
+MO2's profiles itself, so MO2 users start `FO4 Lightbox.exe` from the mod's folder (README).
+
+**The bundled Python, trimmed.** 1.1.0's runtime was the whole standard library and the whole numpy package, each
+module as source plus compiled cache: 1,470 of the main zip's 1,564 files (the viewer itself is 58). 1.2.0 ships only
+what the viewer can import, each module as one lone `.pyc` where its `.py` would be (Python imports those without
+the source; tracebacks show no source lines for stdlib frames). `build_release.py` `runtime_modules()` picks them:
+- Every import statement in the shipped scripts (`RUNTIME_ROOTS`), followed through the standard library and numpy,
+  imports inside functions included (a rarely used code path still finds its module). Skipped: `if __name__ ==
+  '__main__':` blocks (heapq's self-test alone pulled in doctest, pdb, asyncio, multiprocessing, the test suite and
+  setuptools: 467 modules instead of 187) and `if TYPE_CHECKING:` blocks; in `numpy/__init__.py` only module-level
+  imports count (its function-level ones are the lazy `np.fft`, `np.ma`, `np.f2py` ... attributes).
+- Plus what Python and `import numpy, numpy.random` load at start-up, and then, until nothing new turns up, whatever
+  importing all of the kept modules loads: compiled modules import Python modules from C code (`_ctypes` needs
+  `ctypes._layout`, numpy's core needs `numpy._core._exceptions`), which no import statement shows.
+- Plus `RUNTIME_EXTRA`: the codecs the viewer names in strings and Python's defaults, and `numpy.random` (the mesh
+  particle emitters use `np.random.default_rng`).
+- Minus `RUNTIME_DROP`: modules imported only behind `try: ... except ImportError` for what the viewer never does
+  (HTTPS: `ssl` with OpenSSL's DLLs, 6 MB; `.bz2` / `.xz` / `.zst` archives; OpenSSL hashes, where hashlib falls back
+  to the ones built into Python) and site.py's interactive console and `help()`.
+Result (Python 3.14.3, numpy 2.4.3): 212 standard library modules, 8 extension modules, 99 numpy modules, 355 runtime
+files; the main zip 414 files and 17.5 MiB (1.1.0: 1,564 files, 27.3 MiB), 420 files and 18.6 MiB with the physics engine. The build checks the staged runtime in an
+environment without any other Python: every module it holds imports, every `np.<name>` the viewer's code uses
+resolves, `server/app.py --help` runs.
+
 ## 1.1.0 (2026-10-07)
 
 1.0.1 never shipped on its own: 1.1.0 is the first update after 1.0.0 and contains it (MO2, launcher, reload options).
@@ -777,7 +849,7 @@ This section, the README's, Help > About and the Nexus page draft are written by
 
 - **The [NifTools](https://github.com/niftools) team**: [nif.xml](https://github.com/niftools/nifxml), the community's map of the NIF format that Lightbox's mesh reader follows, and [NifSkope](https://github.com/niftools/nifskope). Thanks also to jonwd7 for NifSkope's Fallout 4 renderer, and to hexabits and Candoran2 for its [development builds](https://github.com/hexabits/nifskope).
 - **ousnius**: [BodySlide and Outfit Studio](https://github.com/ousnius/BodySlide-and-Outfit-Studio), the [nifly](https://github.com/ousnius/nifly) NIF library and the [Material Editor](https://github.com/ousnius/Material-Editor), whose BGSM / BGEM layouts Lightbox's material reader follows.
-- **Bad Dog**: [PyNifly](https://github.com/BadDogSkyrim/PyNifly). Its Fallout 4 animation reader ships unchanged inside Lightbox, so the reference body can play any HKX clip, and PyNifly is what Lightbox's NIF reader was checked against.
+- **Bad Dog**: [PyNifly](https://github.com/BadDogSkyrim/PyNifly). Its Fallout 4 animation reader ships unchanged inside Lightbox, so the reference body can play any HKX clip, and PyNifly is what Lightbox's NIF reader was checked against. Its documented Havok collision layouts are what Lightbox's collision reader follows.
 - **Dagobaking**: the spline decompression of Fallout 4 animations (skyrim-fo4-animation-conversion) that PyNifly's reader is based on.
 - **PredatorCZ**: [HavokLib](https://github.com/PredatorCZ/HavokLib), the Havok format library underneath that decompression.
 - **ElminsterAU, Sharlikran, Zilav, Hlp and the xEdit team**: [xEdit](https://github.com/TES5Edit/TES5Edit) / [FO4Edit](https://www.nexusmods.com/fallout4/mods/2737). Lightbox's plugin, weather and cell readers were checked against its record definitions, value by value.
@@ -1261,3 +1333,63 @@ the default app to the user (Open with > Always use this app).
   no further, and a few pixels past it the panel dims with "Let go to hide the panel" and the splitter glows. The
   "Panels" button became a slim see-through tab with » at the view's edge. The game-hour clock lost its LCD box:
   Pip-Boy green type, a shade darker, a thin dark outline.
+
+## Collision and physics (2026-10-11, for 1.2.0)
+
+Bman: "do the collision and physics". Lightbox now reads each model's own Havok collision and simulates it.
+
+- **Server**: `server/collision.py` reads the bhkPhysicsSystem behind every bhkNPCollisionObject (hk_2014 packfiles,
+  through `havok.Packfile`) into plain shapes in the NIF's space and game units: convex hulls with their rounding
+  radius (hknpConvexPolytopeShape / ConvexShape / CapsuleShape / SphereShape, also inside hknpScaledConvexShape) and
+  triangle meshes (hknpCompressedMeshShape: quantised sections, 11-11-10 packed and 21-21-22 shared vertices, quads),
+  through hknpStaticCompoundShape / hknpDynamicCompoundShape instances (rotation, translation, scale), with each
+  body's motion (static / keyframed / dynamic), mass, friction, restitution and collision layer. `GET /api/collision?
+  path=...[&placed=1]` (cached like scenes; placed: the root's own transform left out, as build_scene), `POST
+  /api/collision` for dropped files. Offsets follow PyNifly's documented layouts; the compound instance scale and the
+  scaled convex shape were read off vanilla SCOL meshes.
+- **Where the shapes sit**: in the space of the node that holds the collision object. The body's own position and
+  orientation in the packfile are NOT used: vanilla files carry a copy of the node's transform there, a centre, or
+  nothing, and applying them moved or turned 14-20 % of the meshes twice. `tools/collision_check.py` (all vanilla
+  meshes but precombined / LOD) checks every file decodes, every shape class is read, and the collision box against
+  the render box. All 37,275 vanilla meshes: 26,003 carry collision, every one decodes (0 errors, no shape class left
+  unread, 4.9 million triangles, 62 s); 97.5 % sit within a quarter of the model's size; the rest are real data (water planes, slab collision
+  under flat sidewalks, workshop items' placement boxes, one Red Rocket wall plug whose hull is flipped in the file).
+- **Engine**: Rapier 0.20.0 (`web/vendor/rapier/rapier.mjs`, Apache-2.0, the WebAssembly inlined: nothing is fetched;
+  provenance in its README), loaded on first use by `web/js/physics.js`, simulating in Havok units (metres), Z up.
+  - Static: the cell's landscape (one triangle mesh per cell from the LAND heights) and every placed reference's
+    solid bodies as fixed bodies, nearest the character first (Sanctuary 3 x 3: 646 models, 3,222 shapes in 1.1 s;
+    Vault 111 cryo: 261 models, 1,755 shapes in 0.85 s; a step costs well under 0.1 ms). Outside a cell, the Studio
+    floor. Non-solid layers (water, triggers, zones, camera / pick layers, navmesh cuts) are left out.
+  - Game mode (game.js `updatePhysics`): a 0.3 m x 1.8 m capsule moved by Rapier's character controller (50 degree
+    slopes, 0.55 m steps, ground snapping off while airborne, pushes dropped items); the camera's wall check is a
+    ray. Until the engine is loaded the old depth probes still work.
+  - Items: right-click a model > Drop with physics (it falls from where it is), in game mode F throws the main model.
+    The file's dynamic bodies with their mass, friction and restitution; a model without one falls as its hulls; a
+    moving triangle mesh becomes its hull. The body drives the model's view transform (as the gizmo's: Reset puts
+    it back, a gizmo move or Delete ends it); another place sends dropped items back.
+  - The collision view (the cube button by the bulb): the cell's shapes near the view's centre in blue, the loaded
+    models' own in green (they block nothing), dropped items in orange, the character's capsule; lines behind
+    surfaces faint (renderer `drawCollision`, after TAA like the selection outline).
+- Not yet: the cell's own clutter stays put (it is static here; moving it means moving instances), ragdolls and
+  constraints are not read. (Doors: see "Doors in game mode".)
+
+## Doors in game mode (2026-10-13)
+
+Bman: "do ONLY doors". E in game mode works the door in reach in front of the character (the HUD shows "[E] open /
+close / go through" and its EditorID). The game's DOOR records also cover display cases and levers.
+- **Server:** esm_world reads XTEL on references (the destination door, and where the player appears). Placed DOOR
+  items carry `door`, and load doors carry `tel` {ref, pos, rot}. `/api/door?ref=&pos=` finds the destination door's cell
+  (persistent children first, kept); for an exterior it returns the grid cell under `pos`.
+- **Ordinary doors:** a copy of the door model (`role: 'door'`, `fixedWorld` = the reference's matrix, renderer
+  playerWorld) plays the NIF's Open / Close sequence while the placed instance is hidden
+  (`renderer.hideInstance`: an impossible cull radius, flat copies and shadow maps redone). Only the collision of the
+  parts the Open sequence moves (its channel nodes and everything under them) lets go
+  (`physics.setRefSolid(ref, on, nodes)`), so frames and thresholds stay solid; turning off everything dropped the
+  character through Vault 111's door threshold. Copies go when the cell changes.
+- **Load doors:** the character stands at the XTEL spot at once, facing its way (`-rot z`, as COC markers), with game
+  mode held (`game.frozen`) while the destination cell loads; then it is grounded again.
+- **Checked** (Vault 111 cryo):
+  - V111Door01b blocks when closed, lets the character through when open and keeps the threshold floor (walked
+    through on z 0).
+  - The elevator's autoload door leads to Vault111Ext, landing exactly on its marker.
+

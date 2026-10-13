@@ -5,16 +5,23 @@ See a mesh the way Fallout 4 renders it, without loading the game.
 Lightbox reads your own Fallout 4 install and draws a NIF with the game's materials, weather, time of day,
 imagespace and lighting maths. Open any mesh, wear it, drop it into a real cell and walk around in it.
 
-Version 1.1.0 · Windows 10 / 11 · GPL-3.0 · no F4SE · nothing goes into your game folder
+Version 1.2.0 · Windows 10 / 11 · GPL-3.0 · no F4SE · writes nothing to your game folder
 
 ## Run it
 
-1. Extract the zip anywhere outside `Data`, for example `Documents\FO4 Lightbox`.
+1. Install it one of two ways:
+   - **With a mod manager** (Vortex, Mod Organizer 2): **Mod Manager Download** on Nexus. It goes to
+     `Data\Tools\FO4 Lightbox`, like BodySlide. Vortex: run `Data\Tools\FO4 Lightbox\FO4 Lightbox.exe`, or add it
+     as a tool on the dashboard. MO2: right-click the mod, **Open in Explorer**, then `Tools\FO4 Lightbox\FO4
+     Lightbox.exe` (a desktop shortcut to it works too). It reads your MO2 profile by itself, so it doesn't need to be
+     started from MO2.
+   - **By hand:** extract the zip anywhere outside `Data`, for example `Documents\FO4 Lightbox`. The `fomod` folder
+     next to `FO4 Lightbox` is only for mod managers.
 2. Double-click **FO4 Lightbox.exe**. It finds Fallout 4, starts the viewer in the background and opens it in its own
    window. Close the window to quit.
 3. Type in the Scene search (`backpack`, `combat armor`), click a result, or drop any `.nif` onto the view.
 
-- **Python is included** (`runtime\`: Python 3.14 + numpy). Nothing to install.
+- **Python is included** (`runtime\`: Python 3.14 + numpy, only the parts the viewer uses). Nothing to install.
 - **"Windows protected your PC"?** The launcher is new and not code-signed yet, so Windows SmartScreen may warn the
   first time. Click **More info**, then **Run anyway**. Its source is `launcher\Launcher.cs`; every executable file
   is listed with its checksum in `runtime\BINARIES.txt`. `Start Lightbox.bat` starts the same viewer without it.
@@ -31,6 +38,9 @@ Version 1.1.0 · Windows 10 / 11 · GPL-3.0 · no F4SE · nothing goes into your
   executables list also works: it then opens the profile MO2 has selected.
 - **Vortex** deploys into `Data`, so the game folder already shows your mods.
 - Starting it twice opens another window on the running viewer. Only this PC can connect to it.
+- **Taskbar:** the viewer's window has its own FO4 Lightbox button (not Edge's). If you pinned `FO4 Lightbox.exe`
+  before 1.2.0, unpin it once and pin the running window instead (right-click its button, **Pin to taskbar**): then
+  the pin, the splash and the window share one button.
 
 ## Features
 
@@ -82,7 +92,10 @@ Version 1.1.0 · Windows 10 / 11 · GPL-3.0 · no F4SE · nothing goes into your
 - Plain backgrounds, the slim buttons either side of the places: NifSkope's black or Outfit Studio's grey, exact on
   screen, with NifSkope's floor grid and corner axes (the grid button turns them off). The light and exposure stay the
   Studio's; a place or a cell brings the sky back.
-- Game mode: walk, run, sprint, jump and fly through the cell in third person, at the game's speeds.
+- Game mode: walk, run, sprint, jump and fly through the cell in third person, at the game's speeds, on the models'
+  own Havok collision (walls, stairs, slopes, invisible walls).
+- Physics: right-click a model > Drop with physics (it falls, tips and rolls on its own collision), F throws it in
+  game mode; the collision view (the cube button by the bulb) draws the collision the models carry.
 
 **From a plugin**
 - Pick an armour record: Lightbox loads what the game would load. That's the armature, the male or female model,
@@ -110,7 +123,7 @@ Version 1.1.0 · Windows 10 / 11 · GPL-3.0 · no F4SE · nothing goes into your
 - `tools\capture.py` renders a model or an armour record to PNGs without opening a window, for scripted reviews.
 - Single shapes: Alt+click one in the view, or open a .nif's shapes with the ▸ in the Scene list (small rows, an
   eye each).
-- Right-click a model in the view: Hide .nif, Reset (undo the gizmo) or Delete .nif (out of the scene; the file is never touched).
+- Right-click a model in the view: Hide .nif, Reset (undo the gizmo or a drop), Drop with physics or Delete .nif (out of the scene; the file is never touched).
 - Open .nif files from Explorer: File > Open .nif files with Lightbox adds it to Windows' Open with list (tick
   "Always use this app" once for double-clicks). An open window takes the file and comes to the front.
 - Even light (the bulb in the World panel): one light from the camera and flat ambient, like NifSkope and Outfit
@@ -138,7 +151,7 @@ Version 1.1.0 · Windows 10 / 11 · GPL-3.0 · no F4SE · nothing goes into your
 | wheel | zoom |
 | W A S D, Q / E | fly, down / up (Shift: faster) |
 | click | select a model (outline + file name) |
-| G | game mode: W A S D move, Space jump (hold to fly), Shift sprint, Caps Lock walk, G or Esc leave |
+| G | game mode: W A S D move, Space jump (hold to fly), Shift sprint, Caps Lock walk, E open doors / go through load doors, F throw the .nif, G or Esc leave |
 | R | reload the textures, materials and meshes that changed on disk (before / after) |
 | B (hold) | show "before" while comparing |
 | Alt + click | colour sample (with a compare screenshot: both, and the EV difference) |
@@ -186,9 +199,10 @@ Headless capture: `runtime\python.exe tools\capture.py --help`.
   Mod Organizer 2's folders are only read too.
 - Nothing from Bethesda ships with Lightbox. Meshes, textures, materials, weather, cells and animations are read
   from your own install while it runs.
-- The server listens on `127.0.0.1` only. Lightbox writes only to its own folder (Python's cache files) and to
-  `%LOCALAPPDATA%\FO4 Lightbox` (the window's browser profile with your settings, `server.log`, `settings.json`
-  with the Mods choice, and `game_path.txt` if it had to ask where the game is).
+- The server listens on `127.0.0.1` only. Lightbox writes only to `%LOCALAPPDATA%\FO4 Lightbox` (the window's
+  browser profile with your settings, `server.log`, `settings.json` with the Mods choice, `game_path.txt` if it had
+  to ask where the game is, and Python's cache files in `pycache`), never into its own folder: installed with a mod
+  manager, that folder is `Data\Tools\FO4 Lightbox`, and it stays exactly as the mod manager put it.
 
 ## Credits and thanks
 
@@ -198,7 +212,7 @@ FO4 Lightbox stands on the work of a lot of generous people: modders who mapped 
 
 - **The [NifTools](https://github.com/niftools) team**: [nif.xml](https://github.com/niftools/nifxml), the community's map of the NIF format that Lightbox's mesh reader follows, and [NifSkope](https://github.com/niftools/nifskope). Thanks also to jonwd7 for NifSkope's Fallout 4 renderer, and to hexabits and Candoran2 for its [development builds](https://github.com/hexabits/nifskope).
 - **ousnius**: [BodySlide and Outfit Studio](https://github.com/ousnius/BodySlide-and-Outfit-Studio), the [nifly](https://github.com/ousnius/nifly) NIF library and the [Material Editor](https://github.com/ousnius/Material-Editor), whose BGSM / BGEM layouts Lightbox's material reader follows.
-- **Bad Dog**: [PyNifly](https://github.com/BadDogSkyrim/PyNifly). Its Fallout 4 animation reader ships unchanged inside Lightbox, so the reference body can play any HKX clip, and PyNifly is what Lightbox's NIF reader was checked against.
+- **Bad Dog**: [PyNifly](https://github.com/BadDogSkyrim/PyNifly). Its Fallout 4 animation reader ships unchanged inside Lightbox, so the reference body can play any HKX clip, and PyNifly is what Lightbox's NIF reader was checked against. Its documented Havok collision layouts are what Lightbox's collision reader follows.
 - **Dagobaking**: the spline decompression of Fallout 4 animations (skyrim-fo4-animation-conversion) that PyNifly's reader is based on.
 - **PredatorCZ**: [HavokLib](https://github.com/PredatorCZ/HavokLib), the Havok format library underneath that decompression.
 - **ElminsterAU, Sharlikran, Zilav, Hlp and the xEdit team**: [xEdit](https://github.com/TES5Edit/TES5Edit) / [FO4Edit](https://www.nexusmods.com/fallout4/mods/2737). Lightbox's plugin, weather and cell readers were checked against its record definitions, value by value.
@@ -235,5 +249,6 @@ Each one written fresh from the published method:
 
 GPL-3.0 (`LICENSE`). The source is included: `server\` (Python) and `web\` (JavaScript, GLSL).
 `runtime\` holds the Python 3.14 runtime (PSF licence) and numpy (BSD licence); their licences are in `runtime\`.
+`web\vendor\rapier\` holds the Rapier physics engine (Apache-2.0, Dimforge), unchanged; its licence is next to it.
 How it works, what is measured and what is approximated: `docs\DEVELOPMENT.md`, `docs\engine-notes.md`,
 `docs\weather-notes.md`.

@@ -3,15 +3,17 @@
     python tools/credits.py
 
 rewrites the "Credits and thanks" section of README.md and docs/DEVELOPMENT.md, the credits in Help > About
-(web/index.html) and, when it exists next to the project, the Nexus page draft (../NifViewer_Release/nexus_page.md,
-BBCode). Edit the lists below, never the generated sections. Every link was checked on 2026-10-07.
+(web/index.html) and, when it exists next to the project, the Nexus description draft (BBCode:
+../NifViewer_Release/nexus_description.txt, or nexus_page.md where it lived up to 1.1.0). Edit the lists below, never
+the generated sections. Every link was checked on 2026-10-07.
 """
 import html
 import os
 import re
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-NEXUS = os.path.join(os.path.dirname(ROOT), 'NifViewer_Release', 'nexus_page.md')
+NEXUS = [os.path.join(os.path.dirname(ROOT), 'NifViewer_Release', n) for n in ('nexus_description.txt', 'nexus_page.md')]
+NEXUS_CREDITS = '[size=5][b][color=#e8b04a]Credits'
 
 INTRO = ("FO4 Lightbox stands on the work of a lot of generous people: modders who mapped Fallout 4's file formats "
          "and gave their tools away, researchers who published the methods it draws with, and players who tried it "
@@ -29,7 +31,8 @@ GROUPS = [
         "material reader follows.",
         "**Bad Dog**: [PyNifly](https://github.com/BadDogSkyrim/PyNifly). Its Fallout 4 animation reader ships "
         "unchanged inside Lightbox, so the reference body can play any HKX clip, and PyNifly is what Lightbox's "
-        "NIF reader was checked against.",
+        "NIF reader was checked against. Its documented Havok collision layouts are what Lightbox's collision "
+        "reader follows.",
         "**Dagobaking**: the spline decompression of Fallout 4 animations (skyrim-fo4-animation-conversion) that "
         "PyNifly's reader is based on.",
         "**PredatorCZ**: [HavokLib](https://github.com/PredatorCZ/HavokLib), the Havok format library underneath "
@@ -223,11 +226,13 @@ def main():
         return s[:k] + about_html() + '\n' + s[b:]
     rw(os.path.join(ROOT, 'web', 'index.html'), about)
 
-    if os.path.exists(NEXUS):                  # Bman's Nexus page draft, outside the project (not shipped)
-        def nexus(s):
-            i, j = section(s, r'^\[size=5\]\[b\]\[color=#e8b04a\]Credits', '[size=5][b][color=#e8b04a]License')
-            return s[:i] + bbcode() + '\n\n' + s[j:]
-        rw(NEXUS, nexus)
+    def nexus(s):
+        i, j = section(s, r'^\[size=5\]\[b\]\[color=#e8b04a\]Credits', '[size=5][b][color=#e8b04a]License')
+        return s[:i] + bbcode() + '\n\n' + s[j:]
+    for p in NEXUS:                            # Bman's Nexus drafts, outside the project (not shipped): the one
+        if os.path.exists(p) and NEXUS_CREDITS in open(p, encoding='utf-8').read():   # that holds the credits
+            rw(p, nexus)
+            break
 
 
 if __name__ == '__main__':

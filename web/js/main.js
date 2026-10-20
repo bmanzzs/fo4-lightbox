@@ -2185,7 +2185,7 @@ function loop(now) {
   gizmo.draw();
   const gz = gizmo.summary();
   const t = (selName ? `\u25b8 ${selName}${gz ? `  ${gz}` : ''}\n` : '') + `${R.env.name || ''}  ${hourText(state.hour)}\n` +
-    `exposure ×${R.exposureValue().toFixed(3)}  scene lum ${st.avgLum?.toFixed(3) ?? '-'}  ${drew || held ? fps.toFixed(0) + ' fps' : 'idle'}` +
+    `${R.settings.evenLight ? 'editor colours (no exposure)' : `exposure ×${R.exposureValue().toFixed(3)}`}  scene lum ${st.avgLum?.toFixed(3) ?? '-'}  ${drew || held ? fps.toFixed(0) + ' fps' : 'idle'}` +
     (R.qualityName !== 'ultra' ? `  quality ${TIER_LABEL[R.qualityName]}${quality.pref === 'auto' ? ' (auto)' : ''}` : '') +
     (R.cellMode ? `  ${R.stats_draws ?? 0} draws` : '') + (game.on ? `\nGAME MODE · ${game.state}${doorPrompt()}` : '') +
     (physics.active ? `\nphysics · ${physics.status.models ? `${physics.status.done}/${physics.status.models} models · ` : ''}` +
@@ -2406,6 +2406,7 @@ function menuAction(act, v) {
   if (act === 'import') $('refFileInput').click();
   else if (act === 'screenshot') $('shot').click();
   else if (act === 'openWith') toggleOpenWith();
+  else if (act === 'explorerThumbs') toggleExplorerThumbs();
   else if (act === 'saveSettings') saveSettingsFile();
   else if (act === 'loadSettings') $('settingsInput').click();
   else if (act === 'resetSettings') resetSettings();
@@ -2685,6 +2686,27 @@ async function toggleOpenWith() {
         'with "Always use this app" ticked (Windows leaves the default to you)', 12000);
     }
   } catch (e) { toast('Open with: ' + e.message, 8000); }
+}
+// File > Show .nif thumbnails in Explorer: Windows' thumbnail add-on (server/thumbreg.py). It is registered for the
+// whole PC, so Windows asks for admin rights once to turn it on or off.
+async function toggleExplorerThumbs() {
+  try {
+    const s = await api('thumbs');
+    if (!s.available) {
+      toast('Explorer thumbnails come with the main download of FO4 Lightbox (the one with Python), on Windows', 8000);
+      return;
+    }
+    if (s.on) {
+      if (!confirm('Stop showing pictures of .nif files in Explorer? Windows asks for admin rights to take the add-on out.')) return;
+      await api('thumbs?set=0');
+      toast('Explorer shows the usual icon for .nif files again', 6000);
+    } else {
+      toast('Windows asks for admin rights once to add the thumbnail add-on…', 20000);
+      await api('thumbs?set=1');
+      toast('Done: Explorer now shows a picture of each .nif (view Medium icons or bigger). The first ones take a few ' +
+        'seconds while Lightbox starts in the background; Windows keeps each picture after that', 12000);
+    }
+  } catch (e) { toast('Explorer thumbnails: ' + e.message, 8000); }
 }
 init().catch(e => log(e.message, true)).finally(pollOpens);
 requestAnimationFrame(loop);

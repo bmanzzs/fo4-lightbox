@@ -518,6 +518,7 @@ body.capture #dataNote { display: none !important; }
   <div class="menu"><button class="mtop">File</button><div class="mdrop" hidden>
     <button data-act="import"><span class="mi" data-icon="file"></span>Import .nif…</button>
     <button data-act="openWith" title="Adds FO4 Lightbox to Windows' Open with list for .nif files (or takes it out again): right-click a .nif > Open with > FO4 Lightbox, or pick it once with &quot;Always use this app&quot; to open .nif files with a double-click. A file the game uses opens with its materials and textures; one from anywhere else opens like a dropped file"><span class="mi" data-icon="file"></span>Open .nif files with Lightbox…</button>
+    <button data-act="explorerThumbs" title="Explorer shows a picture of each .nif file, drawn by Lightbox with the game's textures and materials (or takes it out again). Lightbox starts hidden in the background when Explorer asks and stops by itself after 5 minutes; Windows keeps each picture until the file changes. Windows asks for admin rights once, because thumbnail add-ons are set up for the whole PC"><span class="mi" data-icon="camera"></span>Show .nif thumbnails in Explorer…</button>
     <button data-act="screenshot"><span class="mi" data-icon="camera"></span>Save screenshot</button>
     <hr>
     <button data-act="reloadAssets" title="Read again only the textures, materials and meshes of the loaded models that changed on disk; the camera, pose, hour and weather stay. The previous look stays as 'before': drag the split line to compare (key R)"><span class="mi" data-icon="restart"></span>Reload textures &amp; materials <kbd>R</kbd></button>
@@ -580,7 +581,7 @@ body.capture #dataNote { display: none !important; }
       <div class="seg" id="cellRadius" title="Exterior cells: how many cells around the chosen one">
         <button data-r="0">1 cell</button><button data-r="1" class="on">3×3</button><button data-r="2">5×5</button>
         <button id="bdGrid" class="on" title="Grid: NifSkope's floor grid and corner axes on the black or grey background">grid</button>
-        <button id="evenLight" title="Even light, like NifSkope and Outfit Studio: one light from the camera and the same light from every side, so every part is lit wherever you look. No shadows, ambient occlusion, light shafts, fog or colour grading. Click again for the weather's light"></button>
+        <button id="evenLight" title="Even light: lit and coloured the way Outfit Studio shows a mesh (its five lights, the texture's own colours, no game exposure or colour grading), so every part is lit and the colours match the editor. No shadows, ambient occlusion, light shafts or fog. Click again for the weather's light"></button>
         <button id="collView" title="Collision: draws the Havok collision the models carry, as game mode and dropped items use it. Blue: the cell's (near the view's centre), green: the loaded models' own, orange: items dropped with physics. Right-click a model: Drop with physics"></button>
       </div>
       <button class="wide play" id="gameBtn" title="Walk your character (reference body + everything it wears) through the scene: G or Esc to leave">
@@ -753,7 +754,7 @@ body.capture #dataNote { display: none !important; }
 <template id="tplAbout">
   <img class="aboutart" src="about.jpg" alt="FO4 Lightbox">
   <h3>FO4 <b>Lightbox</b></h3>
-  <div class="ver">version <span data-ver>1.2.0</span> · GPL-3.0 · made by Bman</div>
+  <div class="ver">version <span data-ver>1.3.0</span> · GPL-3.0 · made by Bman</div>
   <p>A model viewer for Fallout 4 that actually tries to look like the game. Open any mesh from your install, throw it on a body,
     drop it into a real cell and check it under the game's own weather, time of day and lighting. You can even walk around in it.
     The sun, shadows, fog and tonemapping were tuned against real in-game screenshots, not eyeballed.</p>

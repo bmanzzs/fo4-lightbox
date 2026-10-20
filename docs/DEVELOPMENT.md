@@ -1393,3 +1393,114 @@ close / go through" and its EditorID). The game's DOOR records also cover displa
     through on z 0).
   - The elevator's autoload door leads to Vault111Ext, landing exactly on its marker.
 
+
+## Explorer thumbnails (2026-10-16, for 1.3.0)
+
+Bman: "thumbnails display a preview of the model in explorer". Three parts:
+- **The add-on** (`launcher/thumbs/LightboxThumbs.cs`, built by `tools/build_release.py` into the main zip's
+  `thumbs/LightboxThumbs.dll`, or by `launcher/thumbs/build.ps1` into `launcher/thumbs/build/` for a source copy): a
+  .NET Framework COM class (IInitializeWithStream + IThumbnailProvider) in Windows' thumbnail process. It reads the
+  file's bytes, posts them to the thumbnail service (`/api/thumb?size=&name=`) and turns the PNG into a 32-bit DIB with
+  straight alpha (WTSAT_ARGB). It finds the service by `%LOCALAPPDATA%\FO4 Lightbox\thumbs.port` ("port pid"); when
+  none answers it starts one (one start at a time: a named mutex; after a failed start, none for a minute) with the
+  Python and app.py named in `HKCU\Software\FO4 Lightbox` (ThumbsPython, ThumbsApp). Through ShellExecute, so the
+  service inherits none of the caller's handles (a console pipe kept the test harness waiting).
+- **The service** (`app.py --thumbs`, `server/thumbsvc.py`): no console (output to `thumbs.log`), a free port, no
+  weather or cell index. It joins a kill-on-close job object, so the headless Edge / Chrome it starts and all of that
+  browser's processes end with it however it ends. `/api/thumb` builds the scene and queues a job; the page takes
+  jobs by long poll (`/api/thumbjob`, `/api/thumbscene`) and answers `/api/thumbdone` (PNG, or an error, plus a note
+  with the bounds and view for the log). It stops after 300 s without a thumbnail asked for (the page's polls don't
+  count). The browser's first process hands over and exits, so the browser counts as alive while its page has polled
+  in the last 45 s; a new start gets its own profile folder (a hung one would take the page over).
+- **The page** (`web/thumb.html`, `web/js/thumbpage.js`): the viewer's Renderer on a detached canvas with the
+  reference buttons' studio light (key light from the camera's upper left), no TAA, floor, sky or bloom, fixed
+  exposure. The view: three-quarter front from above (FO4 meshes face +Y); a skinned piece behind the body above the
+  hips (a backpack: bounds centre y < -5, lowest z > 40) from behind; long along Y (weapons) from the side; tall ones
+  nearly level, flat ones from higher up. The camera fits the bounding box's corners in the square (94 %) and centres
+  their projection. Transparency: two pictures, on a black and on a white backdrop (the tonemap lays the backdrop
+  behind the models by their coverage, so the second is a tonemap pass only); coverage a = 1 - (white - black), colour
+  = black / a: exact at edges, glass and hair cards. 2x supersampled up to 512 px, then a box filter on the
+  premultiplied values. Prn pieces are drawn where their file puts them.
+- **The side** (added 2026-10-18; `betterSide` in thumbpage.js). Many props face -Y, not +Y. Examples: the mailbox,
+  the Nuka-Cola machine, the prewar radio, the teddy bear, and every display piece of the backpack rack
+  (meshes\Clothes\Backpacks\BackpackDisplay\Displays).
+  - When the rule isn't sure (anything but worn pieces and weapons), the view and the same view from the opposite side
+    are drawn at 192 px and box-filtered to 96.
+  - The side with clearly more surface detail wins: at least 1.2x the mean brightness change between neighbouring
+    pixels of the model, and the model may not cover less than 0.8x as much.
+  - Measured on 30 rack displays, 41 ground models and 20 vanilla props with a known front. It turned 17 displays,
+    the teddy, the Nuka-Cola machine, both radios, the worn ARC and 15 ground models round, all for the better or
+    the same. Nothing with a +Y front turned. 13 displays stay as they were (too close to call).
+  - It adds about 30 ms per thumbnail (99 files in 8.2 s).
+  - Tried and dropped the same day: choosing the angle that fills the most of the square. It picked flat, head-on
+    views (the pistol muzzle-on, the rack end-on) and lost the three-quarter depth.
+  - Tests: `/api/thumb?view=yaw,pitch` fixes the view, skipping the rule and the side test.
+- **The switch** (`server/thumbreg.py`, File > Show .nif thumbnails in Explorer, `/api/thumbs`): the add-on has to be
+  registered machine-wide (HKLM): the thumbnail process ignores per-user COM classes (REGDB_E_CLASSNOTREG, found with
+  Bman's DdsThumbs). So the viewer runs thumbreg.py elevated (one UAC prompt: python.exe, signed by the PSF) and reads
+  the result it writes. It copies the DLL to `Program Files\FO4 Lightbox Thumbnails\LightboxThumbs.<sha>.dll` (Explorer
+  keeps it loaded: a copy in the viewer's folder would block a mod manager's update; a new build gets a new name, so
+  an update never overwrites a loaded file) and registers CLSID {04c52f43-6c03-495c-ad2e-75f1d570b40a} (mscoree,
+  CodeBase unescaped, both registry views) under `.nif\ShellEx` and `SystemFileAssociations\.nif\ShellEx`. A handler
+  that was there before is kept in the CLSID key and put back when switched off. Each start of the viewer refreshes
+  the HKCU paths while thumbnails are on, so the copy that ran last is the one the add-on starts.
+- **Measured** (this PC, 256 px): first thumbnail 2.2-2.9 s (service, browser and page start), then 40-240 ms each.
+  Particle-only effects, skeletons and other files without shapes get Explorer's usual icon (422).
+
+## Tools never leave browsers behind (2026-10-16)
+
+54 orphaned headless Edge browsers (about 4.9 GB) were found, left by capture and test runs. They leaked for two
+reasons:
+- Edge relaunches itself into a new process, so stopping the PID that was started misses the real browser.
+- A tool stopped mid-run never reaches its clean-up.
+
+`server/procjob.py` `end_with_me()` puts the calling process in a kill-on-close job object: everything it starts
+afterwards ends with it, however it ends. The thumbnail service, `tools/capture.py` and `launcher/make_splash.py`
+call it at start.
+
+The harness, the Nexus page tools and the website shots (outside this folder) start their browsers through
+`Fallout4_Mod_Projects/Tools/ProcKeeper/keep.py` instead, and a sweep catches any orphan that slips through. Details
+are in that folder's README.
+
+## Even light = the editors' look (2026-10-19)
+
+Bman: Even light looked grey and desaturated next to Outfit Studio, especially the Vault suit's yellow. Even light
+only swapped the light; the colours still went through the game's camera chain:
+- linear-space lighting;
+- the filmic curve at exposure 1.8;
+- bloom;
+- sky reflections on shiny parts.
+
+What changed:
+- **Outfit Studio's rendering, as read from its shaders.** `res/shaders/fo4_default.frag` and `.vert` in BodySlide,
+  with the light settings in its Config.xml.
+  - Everything is in gamma space: the texture's stored values, no decoding.
+  - Five lights: ambient 0.2, a frontal light 0.2 along the view, and directional lights of 0.6 from the front left,
+    0.6 from the front right and 0.85 from behind. The directional ones are fixed around the model.
+  - Per light: Oren-Nayar diffuse with interreflection. The roughness is 1 - smoothness where there is a specular
+    map; Lambert without.
+  - Per light: a normalised-Phong specular with Schlick Fresnel (F0 0.2), plus a grazing ambient sheen.
+  - The cube map is scaled by each light.
+  - Finally Hable's filmic curve, divided by its value at 1 so white stays white.
+  - No exposure, bloom, grading or LUT.
+- **Lightbox's version** (written fresh in shaders.js: `editorLook`, `edLight`, `edDiffuse`, `srgbEncode`). When Even
+  light is on (`uClusterI.w` > 0.5), the lit shaders (meshes, cell batches, decals; the landscape without the cube
+  map) use it instead of the game formulas.
+  - The texture's stored value comes back from the GPU's sRGB decode exactly (`srgbEncode`).
+  - The sum is written back as linear (^2.2). TONEMAP_FS (`uEditor`) turns it into gamma again and applies the
+    editor's curve, so effects and the sky pass the same way, without exposure.
+  - The rig turns with the character: `uClusterI.w` = 1 + the player heading. The editor lights a model that faces
+    it; Lightbox turns the character (the Studio faces him toward the sun).
+- **Measured** against Bman's Outfit Studio screenshot (Vault 111 suit, front, the same grey background), medians:
+
+  | | Blue | Yellow | Yellow, brightest 10 % |
+  | --- | --- | --- | --- |
+  | Lightbox | 82, 101, 134 | 197, 167, 93 | 244, 214, 119 |
+  | Outfit Studio | 82, 100, 132 | 190, 170, 89 | 233, 208, 116 |
+  | Old Even light | | too grey to count as yellow | |
+
+- **Regression:** the full 42-shot harness run (`ed_before` from the 1.3.0 build, `ed_after` live) shows every shot
+  within 1/255. None of them uses Even light, so the game look is untouched.
+- **Not mimicked:** Outfit Studio's material specular colour (Lightbox doesn't pass it) and its environment mask
+  texture (Lightbox uses the specular map instead, which is the editor's own fallback). The skin tint stays (the
+  editor shows raw skin textures).

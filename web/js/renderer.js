@@ -172,9 +172,9 @@ export class Renderer {
   // even light (settings.evenLight): the editors' look in place of the weather's (evenEnv); the weather's own env is
   // kept and comes back as it was
   get env() { return this.settings.evenLight ? this.evenEnv() : this._env; }
-  // Like NifSkope's and Outfit Studio's view: one white light from the camera (a little above it, like a flash on a
-  // bracket: faces turned to the viewer are always lit), the same grey ambient from every side, no shadows, AO, light
-  // shafts, fog or colour grading, a fixed exposure. Materials (specular, glow, normal maps, alpha) draw as always.
+  // The editors' look: no shadows, AO, light shafts, fog or colour grading. The lit shaders light the meshes the way
+  // Outfit Studio does instead of with this env (shaders.js editorLook, flag in uClusterI.w) and TONEMAP_FS skips the
+  // game's exposure, bloom and LUTs for the editor's own curve; this env still lights what has no lit shader (the sky).
   evenEnv() {
     if (!this._even) {
       const amb = [0.42, 0.42, 0.42];
@@ -2561,6 +2561,8 @@ export class Renderer {
     }
     F[FR.clusterI + 1] = st.specAA === false ? 0 : 1;
     F[FR.clusterI + 2] = this._aoOn ? 1 : 0;                   // §21 the lit shaders read this frame's occlusion
+    // the editors' look (shaders.js editorLook): 1 + the character's heading (its light rig turns with it)
+    F[FR.clusterI + 3] = st.evenLight ? 1 + (((this.playerHeading || 0) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI) : 0;
     F.set(this._prevVPUse || IDENTITY, FR.prevVP); F.set(this._curVP || IDENTITY, FR.curVP);
     const gl = this.gl;
     // (the block's storage is allocated once, in the constructor: the same bytes, no new allocation per frame)
@@ -3105,6 +3107,7 @@ export class Renderer {
     this.u3f(t, 'uCinematic', st.grade ? env.cinematic : [1, 1, 1]);
     this.u4f(t, 'uTintIS', st.grade ? env.tint : [1, 1, 1, 0]);
     this.u1i(t, 'uTonemapMode', st.tonemap);
+    this.u1f(t, 'uEditor', st.evenLight ? 1 : 0);
     this.u1i(t, 'uShowBloom', st.showBloom);
     // a backdrop (NifSkope black, Outfit Studio grey) behind the models, with NifSkope's grid and corner axes: the
     // coverage is this frame's resolved alpha (also under TAA, whose output keeps its history's age there)

@@ -305,6 +305,67 @@ vec3 softLight(vec3 b, vec3 t) {   // §14, per channel in gamma space
   return mix(lo, hi, step(0.5, t));
 }
 
+// ---- The editors' look (Even light, uClusterI.w): lit the way Outfit Studio lights a mesh (BodySlide's FO4 shader
+// and its default light settings), so a texture shows the colours it has in the editor. Everything is in GAMMA space:
+// the texture's stored values, lit by its rig: ambient 0.2, a frontal light 0.2 along the view, lights of 0.6 from the
+// front left and front right and 0.85 from behind, fixed in the world (characters face +Y). Each light: Oren-Nayar
+// diffuse (rough = 1 - smoothness where there is a specular map; Lambert without), a normalised-Phong specular with
+// Schlick Fresnel (F0 0.2) and the editor's grazing ambient sheen, and the cube map scaled by that light. The sum is
+// written back as linear (^2.2): TONEMAP_FS turns it into gamma again and applies the editor's own curve, so glow
+// effects and the sky go the same way.
+vec3 srgbEncode(vec3 c) {          // the GPU's sRGB decode, undone: the texture's stored value
+  c = max(c, 0.0);
+  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
+}
+float edDiffuse(vec3 N, vec3 V, vec3 L, float rough) {     // Oren-Nayar, N.L folded in, with interreflection
+  float nl = max(dot(N, L), 0.0), nv = max(dot(N, V), 1e-4);
+  if (nl <= 0.0) return 0.0;
+  float s2 = rough * rough;
+  float A = 1.0 - 0.5 * s2 / (s2 + 0.33), B = 0.45 * s2 / (s2 + 0.09);
+  float sl = sqrt(max(1.0 - nl * nl, 0.0)), sv = sqrt(max(1.0 - nv * nv, 0.0));
+  float cphi = sl * sv > 1e-4 ? max(0.0, dot(V - nv * N, L - nl * N)) / (sl * sv) : 0.0;
+  float sinA = nl < nv ? sl : sv, tanB = nl < nv ? sv / nv : sl / nl;          // alpha: the larger angle
+  // light bounced between the rough surface's facets (Oren and Nayar's interreflection term): fabric gains a little
+  float tb = 2.0 * acos(max(nl, nv)) / PI;                                         // 2 beta / pi (beta: the smaller angle)
+  float inter = 0.17 * nl * s2 / (s2 + 0.13) * (1.0 - (dot(L, V) - nl * nv) * tb * tb);
+  return nl * (A + B * cphi * sinA * tanB) + inter;
+}
+void edLight(vec3 L, float I, vec3 N, vec3 V, float s, float k, float rough, inout vec3 dif, inout vec3 spc, inout float envW) {
+  float nl = max(dot(N, L), 1e-4), nv = max(dot(N, V), 1e-4);
+  vec3 H = normalize(L + V);
+  float nh = max(dot(N, H), 1e-4), vh = max(dot(V, H), 1e-4);
+  dif += vec3(edDiffuse(N, V, L, rough) * I);
+  envW += 0.2 + nl * I;
+  if (k <= 0.0) return;
+  float n = exp2(10.0 * s + 1.0);
+  float D = (n + 2.0) / (2.0 * PI) * pow(nh, n);
+  float Gv = min(1.0, min(2.0 * nh * nv / vh, 2.0 * nh * nl / vh)) / nv;           // visibility / N.V
+  float F = sat(pow(1.0 - vh, 5.0) * (1.0 - 0.2) + 0.2);
+  spc += vec3(k * F * Gv * D * 0.25 * PI * nl * I);
+  spc += vec3(0.2 * k * F * (1.0 - nv) * I);                                       // grazing ambient sheen
+}
+vec3 editorLook(vec3 albedo, vec3 N, vec3 V, float s, float k, vec3 emit) {
+  vec3 a = srgbEncode(albedo);
+  float rough = k > 0.0 ? 1.0 - s : 0.0;
+  vec3 back = normalize(vec3(uView[0][2], uView[1][2], uView[2][2]));             // towards the camera
+  // the rig turns with the character (uClusterI.w = 1 + its heading): lit from its own front left, front right and
+  // back, as the editor lights a model that faces it
+  float h = uClusterI.w - 1.0, ch = cos(h), sh = sin(h);
+  mat3 turn = mat3(ch, sh, 0.0, -sh, ch, 0.0, 0.0, 0.0, 1.0);
+  vec3 dif = vec3(0.0), spc = vec3(0.0);
+  float envW = 0.0;
+  edLight(back, 0.2, N, V, s, k, rough, dif, spc, envW);
+  edLight(turn * normalize(vec3(-1.0, 1.0, 0.1)), 0.6, N, V, s, k, rough, dif, spc, envW);
+  edLight(turn * normalize(vec3(1.0, 1.0, 0.1)), 0.6, N, V, s, k, rough, dif, spc, envW);
+  edLight(turn * normalize(vec3(0.0, -1.0, 0.2)), 0.85, N, V, s, k, rough, dif, spc, envW);
+  if (mFlags2.y > 0.5 && k > 0.0) {
+    vec3 cube = srgbEncode(textureLod(uEnvTex, V - 2.0 * dot(N, V) * N, 8.0 - 8.0 * s).rgb);
+    spc += cube * mVals.z * k * envW;
+  }
+  vec3 g = dif * a + spc + srgbEncode(emit) + 0.2 * a;
+  return gammaToLinear(g);
+}
+
 void main() {
   vec2 uv = vUV * mUV.zw + mUV.xy;
   vec4 dif = texture(uDiffuse, uv);
@@ -453,6 +514,7 @@ void main() {
   if (mEmit.w > 0.5) emit = mEmit.rgb * (mMisc.z > 0.5 && mFlags2.x > 0.5 ? texture(uGlowTex, uv).rgb : vec3(1.0));
 
   vec3 color = emit + Ssun + Spts + Samb + albedo * Etotal + env;
+  if (uClusterI.w > 0.5) color = editorLook(albedo, N, V, s, k, emit);     // Even light: the editors' look
   // §21 the game's SAO multiplies the whole lit colour of its deferred surfaces (all light, reflections, emissive)
   // before fog; read from the half-resolution occlusion with an ordinary filtered lookup, as the game's composite
   float ao = uClusterI.z > 0.5 && mDebug.y > 0.5 ? texture(uAO, gl_FragCoord.xy * 0.5 / vec2(textureSize(uAO, 0))).r : 1.0;
@@ -859,6 +921,7 @@ uniform float uTonemapE, uWhite;
 uniform vec3 uCinematic;        // saturation, brightness, contrast
 uniform vec4 uTintIS;           // rgb, amount
 uniform int uTonemapMode, uShowBloom;
+uniform float uEditor;          // 1: Even light, the editors' look (no exposure, bloom, grading or LUT)
 uniform sampler2D uLut0, uLut1; uniform vec2 uLutW;
 // a backdrop in place of the sky and floor (NifSkope black, Outfit Studio grey), exact on screen: the models' coverage
 // is the resolved scene's alpha (the sky and floor leave 0); NifSkope's floor grid and corner axes on top of it
@@ -951,6 +1014,15 @@ void main() {
       }
       if (n > 0.0) hdr = max((hdr - (1.0 - cov) * bg / n) / cov, 0.0);
     }
+  }
+  if (uEditor > 0.5) {
+    // the editors' look (Even light, editorLook in the lit shaders): back to gamma space, then the editor's own curve
+    // (the same filmic curve, scaled so white stays white); no exposure, bloom, grading or LUT
+    vec3 e = pow(max(hdr, 0.0), vec3(1.0 / 2.2));
+    vec3 g = clamp(hable(e, 0.02) / hable(vec3(1.0), 0.02), 0.0, 1.0);
+    if (uBackdrop.a > 0.5) g = axes(mix(back, g, cov));
+    o = vec4(g, 1.0);
+    return;
   }
   vec3 bloom = texture(uBloom, vUV).rgb;
   vec3 x = (hdr + bloom) * ex;                         // bloom is added before exposure
@@ -1247,7 +1319,8 @@ vec2 landSpec(vec2 uv) {
   .replace('if (mFlags2.z > 0.5) albedo = textureLod(uPalette, vec2(pow(max(dif.g, 0.0), 1.0 / 2.2), mVals.w), 0.0).rgb;', '')
   .replace('texture(uGlowTex, uv).rgb', 'vec3(1.0)')
   .replace('lod = max(lod, log2(max(sqrt(max(dot(rx, rx), dot(ry, ry))) * float(textureSize(uEnvTex, 0).x) * 0.6366, 1.0)));', 'lod = lod;')
-  .replace('vec3 cube = textureLod(uEnvTex, dir, lod).rgb;', 'vec3 cube = vec3(0.0);');
+  .replace('vec3 cube = textureLod(uEnvTex, dir, lod).rgb;', 'vec3 cube = vec3(0.0);')
+  .replace('vec3 cube = srgbEncode(textureLod(uEnvTex, V - 2.0 * dot(N, V) * N, 8.0 - 8.0 * s).rgb);', 'vec3 cube = vec3(0.0);');
 // every replace above must hit: a silent miss leaves the landscape reading a sampler on a unit its layers use
 for (const k of ['textureSize(uEnvTex', 'textureLod(uEnvTex', 'texture(uDiffuse', 'texture(uGlowTex'])
   if (LAND_FS.includes(k)) console.error(`LAND_FS: lighting shader text changed, "${k}" was not replaced`);

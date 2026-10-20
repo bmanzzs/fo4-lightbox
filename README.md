@@ -5,7 +5,7 @@ See a mesh the way Fallout 4 renders it, without loading the game.
 Lightbox reads your own Fallout 4 install and draws a NIF with the game's materials, weather, time of day,
 imagespace and lighting maths. Open any mesh, wear it, drop it into a real cell and walk around in it.
 
-Version 1.2.0 · Windows 10 / 11 · GPL-3.0 · no F4SE · writes nothing to your game folder
+Version 1.3.0 · Windows 10 / 11 · GPL-3.0 · no F4SE · writes nothing to your game folder
 
 ## Run it
 
@@ -126,8 +126,15 @@ Version 1.2.0 · Windows 10 / 11 · GPL-3.0 · no F4SE · writes nothing to your
 - Right-click a model in the view: Hide .nif, Reset (undo the gizmo or a drop), Drop with physics or Delete .nif (out of the scene; the file is never touched).
 - Open .nif files from Explorer: File > Open .nif files with Lightbox adds it to Windows' Open with list (tick
   "Always use this app" once for double-clicks). An open window takes the file and comes to the front.
-- Even light (the bulb in the World panel): one light from the camera and flat ambient, like NifSkope and Outfit
-  Studio, so every part is lit wherever you look.
+- Explorer thumbnails: File > Show .nif thumbnails in Explorer makes Explorer show a picture of each .nif (view Medium
+  icons or bigger), drawn by Lightbox with the game's textures and materials on a transparent background. Lightbox
+  starts hidden in the background when Explorer asks (the first picture takes 2-3 s, then about 0.1 s each) and stops
+  by itself after 5 minutes; Windows keeps each picture until the file changes. Windows asks for admin rights once,
+  because thumbnail add-ons are set up for the whole PC; the add-on (`thumbs\LightboxThumbs.dll`, source in
+  `launcher\thumbs`) is copied to `Program Files\FO4 Lightbox Thumbnails`, so a mod manager can still update or
+  remove Lightbox. The same menu item takes it out again. Main download only (it needs the bundled Python).
+- Even light (the bulb in the World panel): lit and coloured the way Outfit Studio shows a mesh (its light rig, the
+  texture's own colours, no game exposure or colour grading), so every part is lit and the colours match the editor.
 - A still scene uses no GPU. View > Quality (Auto by default) keeps weaker PCs usable: laptop graphics and 2-4 GB
   cards get smaller textures, less anti-aliasing and a lower resolution while something moves; a strong GPU keeps
   full quality.

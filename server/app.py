@@ -34,7 +34,7 @@ from materials import read_material                      # noqa: E402
 
 WEB = os.path.join(os.path.dirname(HERE), 'web')
 SCENE_DIR = os.path.join(os.path.dirname(HERE), 'scenes')
-VERSION = '1.2.0'
+VERSION = '1.3.0'
 BOOT = '%.3f' % time.time()        # changes on every server start: open pages reload themselves (live update)
 # gzip level of JSON answers and SceneCache entries: level 2 makes a cold Sanctuary's models + LOD ~2 % larger than 5
 # at about half the compression time (the answer waits for it); the page gets the same JSON bytes either way
@@ -262,7 +262,8 @@ class State:
     extra_plugins = []             # --plugin: loaded after the load order (a plugin that is not enabled)
     paused = ''                    # files that kept "changing" again and again: automatic checks stopped
     rebuilds = []                  # times of the recent rebuilds (see note_change)
-    last_request = time.monotonic()  # --exit-when-idle
+    last_request = time.monotonic()  # --exit-when-idle (the thumbnail service: the last thumbnail asked for)
+    thumbs = None                  # --thumbs: the Explorer thumbnail service (thumbsvc.Service)
     nif_list = None
     lock = threading.Lock()
     list_lock = threading.Lock()   # one mesh listing made at a time (_listing)
@@ -756,6 +757,46 @@ def open_with_state():
         return dict(on=False, exe=os.path.isfile(os.path.join(APP_DIR, 'FO4 Lightbox.exe')))
 
 
+# File > Show .nif thumbnails in Explorer (thumbreg.py, thumbsvc.py): the add-on ships in the main zip's thumbs folder;
+# a source copy has it once launcher/thumbs/build.ps1 has built it
+def thumbs_dll():
+    for p in (os.path.join(APP_DIR, 'thumbs', 'LightboxThumbs.dll'),
+              os.path.join(APP_DIR, 'launcher', 'thumbs', 'build', 'LightboxThumbs.dll')):
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def thumbs_python():
+    exe = sys.executable
+    if os.path.basename(exe).lower() == 'pythonw.exe':
+        exe = os.path.join(os.path.dirname(exe), 'python.exe')
+    return exe
+
+
+def thumbs_state():
+    import thumbreg
+    return dict(thumbreg.state(), available=os.name == 'nt' and thumbs_dll() is not None)
+
+
+def thumbs_switch(on):
+    import thumbreg
+    if on:
+        thumbreg.set_user_paths(thumbs_python(), os.path.join(HERE, 'app.py'))
+    thumbreg.switch(on, thumbs_dll())
+    return thumbs_state()
+
+
+def thumbs_keep_paths():
+    """While thumbnails are on, the add-on starts the copy of the viewer that ran last (an update or a move)."""
+    try:
+        import thumbreg
+        if thumbreg.state()['on']:
+            thumbreg.set_user_paths(thumbs_python(), os.path.join(HERE, 'app.py'))
+    except Exception:
+        pass
+
+
 
 def collision_of(raw, placed):
     """A NIF's collision bodies (collision.nif_collision); placed: drawn at a cell reference, where (as build_scene)
@@ -833,7 +874,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_gz(gz)
 
     def do_GET(self):
-        State.last_request = time.monotonic()
+        if State.thumbs is None:                        # (the thumbnail service counts thumbnails asked for only)
+            State.last_request = time.monotonic()
         u = urlparse(self.path)
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
         try:
@@ -859,12 +901,18 @@ class Handler(BaseHTTPRequestHandler):
             return self.error(500, f'{type(e).__name__}: {e}')
 
     def do_POST(self):
-        State.last_request = time.monotonic()
+        if State.thumbs is None:
+            State.last_request = time.monotonic()
         u = urlparse(self.path)
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
         try:
             n = int(self.headers.get('Content-Length', 0))
             body = self.rfile.read(n)
+            if u.path == '/api/thumb':                  # Explorer's thumbnail add-on: a NIF's bytes -> its picture
+                return self.thumb(body, q)
+            if u.path == '/api/thumbdone' and State.thumbs:     # the thumbnail page: a job's PNG, or why it failed
+                State.thumbs.finish(int(q.get('id') or 0), body or None, q.get('error'), q.get('note'))
+                return self.send(200, {})
             if u.path == '/api/nif':
                 return self.send(200, build_scene(body, State.vfs, q.get('name', 'dropped.nif')))
             if u.path == '/api/collision':              # a dropped / imported NIF's collision
@@ -882,6 +930,29 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             traceback.print_exc()
             return self.error(500, f'{type(e).__name__}: {e}')
+
+    def thumb(self, body, q):
+        """One Explorer thumbnail (app.py --thumbs only): the scene is built here, drawn by the headless page."""
+        S = State.thumbs
+        if S is None:
+            return self.error(404, 'this is not the thumbnail service (app.py --thumbs)')
+        State.last_request = time.monotonic()
+        size = max(16, min(1024, int(q.get('size') or 256)))
+        name = os.path.basename(q.get('name') or 'thumbnail.nif')
+        try:
+            sc = build_scene(body, State.vfs, name)
+        except Exception as e:                          # not a NIF this reader knows: Explorer shows the icon
+            return self.error(422, f'{type(e).__name__}: {e}')
+        if not sc.get('shapes'):
+            return self.error(422, 'nothing to draw (no shapes)')
+        gz = gzip.compress(json.dumps(sc, separators=(',', ':')).encode(), GZ_LEVEL)
+        try:
+            png = S.render(gz, size, name, q.get('view'))
+        except RuntimeError as e:
+            return self.error(500, str(e))
+        finally:
+            State.last_request = time.monotonic()
+        return self.send(200, png, 'image/png')
 
     def static(self, path):
         """A page file. Kept (with its gzip) while its size and date stay the same, sent with an ETag and no-cache: a
@@ -963,6 +1034,23 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, open_with(q['set'] == '1'))
             except Exception as e:
                 return self.error(500, str(e))
+        if ep == 'thumbs':                              # File > Show .nif thumbnails in Explorer (one UAC prompt)
+            if 'set' not in q:
+                return self.send(200, thumbs_state())
+            try:
+                return self.send(200, thumbs_switch(q['set'] == '1'))
+            except PermissionError as e:
+                return self.error(403, str(e))
+            except Exception as e:
+                return self.error(500, str(e))
+        if ep == 'thumbjob':                            # the thumbnail page (thumb.html): the next picture to draw
+            if State.thumbs is None:
+                return self.error(404, 'this is not the thumbnail service')
+            job = State.thumbs.take()
+            return self.send(200, dict(id=job.id, size=job.size, name=job.name, view=job.view) if job else {})
+        if ep == 'thumbscene':
+            gz = State.thumbs.scene(int(q.get('id') or 0)) if State.thumbs else None
+            return self.send_gz(gz) if gz else self.error(404, 'no such thumbnail job')
         if ep == 'version':
             return self.send(200, dict(boot=BOOT, web=web_stamp(), data=data_generation(), paused=State.paused))
         if ep == 'ready':                               # FO4 Lightbox.exe's splash: what has finished loading
@@ -1347,7 +1435,17 @@ def main():
                          'Mod Organizer 2 set up for Fallout 4 is found and used, and the last choice is kept')
     ap.add_argument('--mo2', metavar='FOLDER', help='a Mod Organizer 2 instance (or portable MO2) folder to read')
     ap.add_argument('--profile', help='with --mo2: the profile to read (default: the one selected in MO2)')
+    ap.add_argument('--thumbs', action='store_true',
+                    help='run as the Explorer thumbnail service (started by the thumbnail add-on; no window)')
     a = ap.parse_args()
+    if a.thumbs:                                    # started hidden by Explorer's add-on: no console, no window
+        import thumbsvc
+        if thumbsvc.running(settings_dir()):
+            return                                  # one is running already (started at the same moment)
+        thumbsvc.log_to(os.path.join(settings_dir(), 'thumbs.log'))
+        from procjob import end_with_me
+        end_with_me()
+        a.port, a.no_browser = 0, True              # (a free port, written to thumbs.port)
     State.extra_plugins = [os.path.abspath(x) for x in a.plugin]
     if a.save_dir:
         os.makedirs(a.save_dir, exist_ok=True)
@@ -1406,6 +1504,19 @@ def main():
     print(f'  {len(State.vfs.archives)} archives, {len(State.vfs.index):,} archived files indexed in {time.time() - t:.1f} s')
     for e in State.vfs.errors:
         print('  archive error:', e)
+    if a.thumbs:                                    # meshes, materials and textures only: no weather or cells
+        port = srv.server_address[1]
+        State.thumbs = thumbsvc.Service(settings_dir(), port)
+        State.thumbs.publish()
+        thumbsvc.say(f'thumbnail service on port {port}; stops after {thumbsvc.IDLE} s without a request')
+        threading.Thread(target=State.thumbs.ensure_browser, daemon=True).start()
+        threading.Thread(target=exit_when_idle, args=(srv, thumbsvc.IDLE), daemon=True).start()
+        try:
+            srv.serve_forever()
+        finally:
+            State.thumbs.stop()
+        return
+    threading.Thread(target=thumbs_keep_paths, daemon=True).start()
     threading.Thread(target=load_weather_db, daemon=True).start()
     threading.Thread(target=load_world_db, daemon=True).start()
     threading.Thread(target=nif_list, daemon=True).start()

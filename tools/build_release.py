@@ -43,10 +43,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP = 'FO4 Lightbox'                                     # the folder inside the zips
 INCLUDE = ['Start Lightbox.bat', 'README.md', 'LICENSE',
            'server/*.py', 'server/vendor/*.py', 'server/vendor/README.md',
-           'web/index.html', 'web/js/*.js', 'web/icon.png', 'web/about.jpg',
+           'web/index.html', 'web/thumb.html', 'web/js/*.js', 'web/icon.png', 'web/about.jpg',
            'web/vendor/rapier/rapier.mjs', 'web/vendor/rapier/LICENSE', 'web/vendor/rapier/README.md',
            'launcher/Launcher.cs', 'launcher/app.manifest', 'launcher/lightbox.ico', 'launcher/make_icon.py',
            'launcher/make_splash.py', 'launcher/splash/splash.html',
+           'launcher/thumbs/LightboxThumbs.cs', 'launcher/thumbs/build.ps1',
            'docs/DEVELOPMENT.md', 'docs/engine-notes.md', 'docs/weather-notes.md',
            'scenes/*.esp',
            'tools/capture.py', 'tools/check_clean.py', 'tools/build_simple_cell.py', 'tools/build_release.py',
@@ -55,6 +56,7 @@ INCLUDE = ['Start Lightbox.bat', 'README.md', 'LICENSE',
 # caches, the remembered game folder
 EXCLUDE = ['.claude/*', '*/__pycache__/*', '*.pyc', 'docs/prior-art.md', 'tools/calibration/*',
            'tools/restart_lightbox.ps1', 'game_path.txt',
+           'launcher/thumbs/build/*',       # a source copy's own build of the thumbnail add-on (the release builds it)
            'launcher/splash.png']           # rendered from launcher/splash/splash.html by make_splash.py; inside the exe
 
 # The runtime holds only the modules the viewer can import (runtime_modules), starting from these shipped scripts
@@ -362,7 +364,11 @@ def write_binaries(dst, pyver, npver, site, extra=()):
         digest = sha256(p)
         s = sig.get(os.path.normcase(p), {})
         signed = f"signed: {s['signer']}" if s.get('status') == 'Valid' else 'not signed'
-        if p in extra:
+        if p in extra and os.path.basename(p) == os.path.basename(THUMBS_DLL):
+            r = '..\\' + THUMBS_DLL.replace('/', '\\')
+            origin, check = ('the Explorer .nif thumbnail add-on (only used once turned on in File > Show .nif '
+                             'thumbnails in Explorer), compiled from launcher\\thumbs\\LightboxThumbs.cs the same way'), ''
+        elif p in extra:
             r = '..\\' + os.path.basename(p)
             origin, check = ('the viewer\'s launcher, compiled from launcher\\Launcher.cs by tools\\build_release.py with '
                              'the .NET Framework 4 C# compiler that ships with Windows'), ''
@@ -382,8 +388,10 @@ def write_binaries(dst, pyver, npver, site, extra=()):
     with open(os.path.join(dst, 'BINARIES.txt'), 'w', encoding='utf-8', newline='\r\n') as f:
         f.write(f'''Every executable file (.exe / .dll / .pyd) in FO4 Lightbox: {len(rows)} files, {nsigned} digitally signed.
 
-The viewer itself is the Python and JavaScript source in server\\ and web\\. Its only compiled file of its own is
-..\\FO4 Lightbox.exe, a small launcher built from the source in launcher\\Launcher.cs (listed first, not signed).
+The viewer itself is the Python and JavaScript source in server\\ and web\\. Its only compiled files of its own are
+..\\FO4 Lightbox.exe, a small launcher built from the source in launcher\\Launcher.cs, and
+..\\thumbs\\LightboxThumbs.dll, the Explorer thumbnail add-on built from launcher\\thumbs\\LightboxThumbs.cs (both
+listed first, not signed).
 The rest are the unmodified Python {pyver} runtime from python.org (signed by the Python Software Foundation;
 vcruntime by Microsoft) and the numpy {npver} package from PyPI (its compiled modules are not signed by the numpy
 project; each one matches the SHA-256 in numpy's own RECORD file, site-packages\\numpy-{npver}.dist-info\\RECORD).
@@ -490,7 +498,7 @@ def write_zip(path, stage, skip_runtime, version):
                 continue
             for f in sorted(fn):
                 p = os.path.join(dp, f)
-                if skip_runtime and rel(p, stage) == LAUNCHER:
+                if skip_runtime and rel(p, stage) in (LAUNCHER, THUMBS_DLL):
                     continue                                    # the file without Python has no executables
                 parts = rel(p, stage).split('/')
                 if '__pycache__' in parts[:-1] and parts[0] != 'runtime':
@@ -501,6 +509,7 @@ def write_zip(path, stage, skip_runtime, version):
 
 
 LAUNCHER = 'FO4 Lightbox.exe'
+THUMBS_DLL = 'thumbs/LightboxThumbs.dll'                  # Explorer .nif thumbnails (server/thumbreg.py registers it)
 
 
 def find_csc():
@@ -540,6 +549,29 @@ def build_launcher(out_exe, version):
     if r.returncode or not os.path.isfile(out_exe):
         sys.exit('building the launcher failed:\n' + r.stdout + r.stderr)
     return out_exe
+
+
+def build_thumbs_dll(out_dll, version):
+    """thumbs/LightboxThumbs.dll from launcher/thumbs/LightboxThumbs.cs: Explorer's .nif thumbnail add-on. Its
+    AssemblyVersion stays 1.0.0.0 (the COM registration names it); the file version is the viewer's."""
+    csc = find_csc()
+    os.makedirs(os.path.dirname(out_dll), exist_ok=True)
+    info = os.path.join(os.path.dirname(out_dll), '_AssemblyInfo.cs')
+    v4 = '.'.join((version.split('.') + ['0', '0', '0'])[:4])
+    with open(info, 'w', encoding='utf-8') as f:
+        f.write(f'[assembly: System.Reflection.AssemblyFileVersion("{v4}")]\n'
+                f'[assembly: System.Reflection.AssemblyInformationalVersion("{version}")]\n'
+                '[assembly: System.Reflection.AssemblyCompany("Bman")]\n'
+                '[assembly: System.Reflection.AssemblyCopyright("GPL-3.0")]\n')
+    try:
+        r = subprocess.run([csc, '/nologo', '/codepage:65001', '/target:library', '/optimize+', '/r:System.Drawing.dll',
+                            '/out:' + out_dll, os.path.join(ROOT, 'launcher', 'thumbs', 'LightboxThumbs.cs'), info],
+                           capture_output=True, text=True)
+    finally:
+        os.remove(info)
+    if r.returncode or not os.path.isfile(out_dll):
+        sys.exit('building the thumbnail add-on failed:\n' + r.stdout + r.stderr)
+    return out_dll
 
 
 def nested_archives(stage):
@@ -584,6 +616,8 @@ def main():
     if not a.no_runtime and not a.no_launcher:
         extra.append(build_launcher(os.path.join(stage, LAUNCHER), ver))
         print(f'  {LAUNCHER}: {os.path.getsize(extra[0]) / 1024:.0f} KiB')
+        extra.append(build_thumbs_dll(os.path.join(stage, *THUMBS_DLL.split('/')), ver))
+        print(f'  {THUMBS_DLL}: {os.path.getsize(extra[1]) / 1024:.0f} KiB')
     if not a.no_runtime:
         pyver, npver, mods = build_runtime(os.path.join(stage, 'runtime'), extra)
         nfiles = sum(len(fn) for _, _, fn in os.walk(os.path.join(stage, 'runtime')))

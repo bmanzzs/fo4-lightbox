@@ -12,6 +12,7 @@ import os
 import socket
 import struct
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.request
@@ -86,6 +87,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--out', default=os.path.join(HERE, 'splash.png'))
     a = ap.parse_args()
+    sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'server'))
+    from procjob import end_with_me
+    end_with_me()                        # the headless browser started here ends with this script, however it ends
     exe = next((e for e in EDGE if os.path.isfile(e)), None)
     if not exe:
         raise SystemExit('Microsoft Edge not found')

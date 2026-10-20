@@ -71,6 +71,9 @@ def lighting_list(text):
 
 
 def main(argv=None):
+    sys.path.insert(0, os.path.join(ROOT, 'server'))
+    from procjob import end_with_me
+    end_with_me()                        # the server and browser started here end with this script, however it ends
     ap = argparse.ArgumentParser(description='Lightbox capture: render a model to PNGs in a headless browser.')
     ap.add_argument('--out', required=True, help='output folder (created)')
     ap.add_argument('--name', default=None, help='file name prefix (default: from the model)')

@@ -34,7 +34,7 @@ from materials import read_material                      # noqa: E402
 
 WEB = os.path.join(os.path.dirname(HERE), 'web')
 SCENE_DIR = os.path.join(os.path.dirname(HERE), 'scenes')
-VERSION = '1.3.0'
+VERSION = '1.3.1'
 BOOT = '%.3f' % time.time()        # changes on every server start: open pages reload themselves (live update)
 # gzip level of JSON answers and SceneCache entries: level 2 makes a cold Sanctuary's models + LOD ~2 % larger than 5
 # at about half the compression time (the answer waits for it); the page gets the same JSON bytes either way
@@ -1162,10 +1162,12 @@ class Handler(BaseHTTPRequestHandler):
             cut = tuple(float(v) for v in q['cut'].split(',')) if q.get('cut') else None     # distant LOD (world.js)
             if cut and len(cut) != 4:
                 return self.error(400, 'cut needs x0,y0,x1,y1')
+            remap = float(q['remap']) if q.get('remap') else None       # a placed object's MODC palette row
 
             def build(rec):
                 v = ArchiveView(rec) if vanilla else rec      # vanilla: archived mesh, materials and textures
-                sc = build_scene(v.read(path), v, norm(path), swap_map(), placed=placed, cut=cut)
+                sc = build_scene(v.read(path), v, norm(path), swap_map(), remap=remap, placed=placed, cut=cut,
+                                 remap_bands=True)
                 sc['source'] = 'archive' if vanilla and norm(path) in vfs.index else vfs.source(path)
                 if sc['source'] == 'loose' and vfs.origin.mod_of(norm(path)):
                     sc['mod'] = vfs.origin.mod_of(norm(path))      # Mod Organizer 2: the mod it comes from
@@ -1173,7 +1175,7 @@ class Handler(BaseHTTPRequestHandler):
                 return sc
             # material swaps come from a plugin: a cached scene with swaps is only good for the index it was read from
             return self.send_scene(('nif', norm(path), vanilla, q.get('swap', ''), State.world_gen if W else 0, placed,
-                                    cut), build)
+                                    cut, remap), build)
         if ep == 'collision':                       # a NIF's Havok collision as plain shapes (game mode, physics)
             path = q['path']
             placed = q.get('placed') == '1'

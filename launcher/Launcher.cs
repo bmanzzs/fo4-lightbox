@@ -4,7 +4,7 @@
 // Built by tools/build_release.py with the C# compiler that ships with Windows (.NET Framework 4, C# 5):
 //     csc /target:winexe /win32icon:launcher\lightbox.ico /win32manifest:launcher\app.manifest
 //         /resource:launcher\lightbox.ico,lightbox.ico /resource:launcher\splash.png,splash.png
-//         /r:System.Windows.Forms.dll /r:System.Drawing.dll launcher\Launcher.cs <AssemblyInfo>
+//         /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Management.dll launcher\Launcher.cs <AssemblyInfo>
 //
 // While it starts, a splash window shows the artwork (launcher/splash.png, rendered from launcher/splash/splash.html)
 // with the live status and a progress bar that follows the real steps: Python, the archive index, weather, the
@@ -15,8 +15,8 @@
 //   2. Otherwise start runtime\python.exe server\app.py (or the PC's own Python 3 when there is no runtime folder)
 //      hidden, with its output in %LOCALAPPDATA%\FO4 Lightbox\server.log, and wait until it has loaded.
 //   3. Fallout 4 not found: ask for the folder (kept in %LOCALAPPDATA%\FO4 Lightbox\game_path.txt), start again.
-//   4. Open the window (its own browser profile in %LOCALAPPDATA%\FO4 Lightbox\browser), wait until it closes, then
-//      stop the server. No Edge or Chrome: the default browser instead, and the server stops a few minutes after the
+//   4. Open the window (its own browser profile in %LOCALAPPDATA%\FO4 Lightbox\browser), wait until it closes (also
+//      when Edge hands it to another of its processes: see the wait loop), then stop the server. No Edge or Chrome: the default browser instead, and the server stops a few minutes after the
 //      last page is gone (--exit-when-idle).
 // Arguments are passed on to the server (--game, --port, --plugin ...); --choose-game asks for the game folder again.
 using System;
@@ -27,6 +27,7 @@ using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Drawing.Text;
 using System.IO;
+using System.Management;
 using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
@@ -42,7 +43,7 @@ static class Launcher
     const string Title = "FO4 Lightbox";
     const int IdleSeconds = 180;          // the server's own stop when no page is left (a minimised page still asks)
 
-    static string root, home, logPath;
+    static string root, home, logPath, profileDir;
     static StreamWriter log;
     static readonly object logLock = new object();
     static readonly StringBuilder tail = new StringBuilder();
@@ -60,7 +61,10 @@ static class Launcher
         Application.SetCompatibleTextRenderingDefault(false);
         WebRequest.DefaultWebProxy = null;                   // local requests only: skip the proxy lookup
         root = AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\');
-        home = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), Title);
+        // %LOCALAPPDATA% as the server reads it (the same folder normally; a test can point both elsewhere)
+        string la = Environment.GetEnvironmentVariable("LOCALAPPDATA");
+        if (string.IsNullOrEmpty(la)) la = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        home = Path.Combine(la, Title);
         try { Directory.CreateDirectory(home); }
         catch (Exception) { home = Path.Combine(Path.GetTempPath(), Title); Directory.CreateDirectory(home); }
         logPath = Path.Combine(home, "server.log");
@@ -196,13 +200,19 @@ static class Launcher
 
         // wait for the window to close, then stop the server. A server that stops while the window is still open (its
         // idle stop after the PC slept, a crash) starts again on the same port: the page reloads and puts the scene
-        // back instead of ending on "127.0.0.1 refused to connect"
+        // back instead of ending on "127.0.0.1 refused to connect".
+        // "The window is open" = the Edge process started above is alive, or a visible window of an Edge / Chrome
+        // process running on the viewer's own profile is. Edge hands the window to another process of its own and
+        // the first one exits at once (on a fresh profile, a first start; or to one still running on the profile):
+        // 1.2.0 / 1.3.0 then stopped the server under an open page, which hung on "Loading…". A few seconds' grace
+        // for a window still appearing
         int restarts = 0, ticks = 0;
+        DateTime seen = DateTime.Now;
         while (true)
         {
             if (server.HasExited)
             {
-                if (window.HasExited) return 0;
+                if (window.HasExited && !WindowOpen()) return 0;
                 if (++restarts > 5)
                 {
                     if (server.ExitCode != 0)
@@ -217,11 +227,81 @@ static class Launcher
                 }
                 continue;
             }
-            if (window.WaitForExit(500)) break;
-            if (++ticks % 4 == 0) StampWindows(window);    // (cheap when stamped; catches a window Edge made again)
+            if (!window.WaitForExit(500))
+            {
+                seen = DateTime.Now;
+                if (++ticks % 4 == 0) StampWindows(window);    // (cheap when stamped; catches a window Edge made again)
+                continue;
+            }
+            if (WindowOpen()) seen = DateTime.Now;              // (stamps it too: the taskbar button after a hand-over)
+            else if ((DateTime.Now - seen).TotalSeconds > 8) break;
+            Thread.Sleep(1000);
         }
         Stop(server);
         return 0;
+    }
+
+    // a visible top-level window of a browser process on the viewer's own profile (whichever process Edge gave the
+    // window to), or one already carrying the viewer's taskbar ID. Found ones are stamped with that ID
+    static bool WindowOpen()
+    {
+        HashSet<uint> pids = ProfilePids();
+        bool found = false;
+        EnumWindows((h, l) =>
+        {
+            if (!IsWindowVisible(h) || GetWindow(h, 4) != IntPtr.Zero) return true;     // (GW_OWNER: menus, popups)
+            uint p;
+            GetWindowThreadProcessId(h, out p);
+            if (pids.Contains(p))
+            {
+                // an app window's title is the page's alone; an ordinary browser window on the profile (" - Microsoft
+                // Edge", with a zero-width space in it) is not the viewer
+                string t = WindowText(h).Replace("​", "");
+                if (t.EndsWith("Microsoft Edge") || t.EndsWith("Google Chrome")) return true;
+                Stamp(h); found = true; return false;
+            }
+            IPropertyStore store = null;
+            try
+            {
+                Guid iid = typeof(IPropertyStore).GUID;
+                if (SHGetPropertyStoreForWindow(h, ref iid, out store) == 0 && store != null && ReadString(store, KeyId) == AppId)
+                {
+                    found = true;
+                    return false;
+                }
+            }
+            catch (Exception) { }
+            finally { if (store != null) Marshal.ReleaseComObject(store); }
+            return true;
+        }, IntPtr.Zero);
+        return found;
+    }
+
+    // the browser processes whose command line names the viewer's profile folder (WMI; about 0.1 s, asked at most
+    // once a second, only after the started process has gone)
+    static HashSet<uint> ProfilePids()
+    {
+        HashSet<uint> set = new HashSet<uint>();
+        if (profileDir == null) return set;
+        try
+        {
+            using (ManagementObjectSearcher s = new ManagementObjectSearcher(
+                "SELECT ProcessId, CommandLine FROM Win32_Process WHERE Name='msedge.exe' OR Name='chrome.exe'"))
+            using (ManagementObjectCollection all = s.Get())
+            {
+                foreach (ManagementBaseObject o in all)
+                {
+                    using (o)
+                    {
+                        string cl = o["CommandLine"] as string;
+                        if (cl != null && cl.IndexOf(profileDir, StringComparison.OrdinalIgnoreCase) >= 0)
+                            set.Add(Convert.ToUInt32(o["ProcessId"]));
+                    }
+                }
+            }
+        }
+        catch (Exception) { }
+        return set;
     }
 
     static void WaitForWindow(Process window)
@@ -538,8 +618,12 @@ static class Launcher
         string browser = FindBrowser();
         if (browser == null) return null;
         string profile = Path.Combine(home, "browser");
+        profileDir = profile;
+        // --disk-cache-size: the profile's cache keeps every texture and scene the viewer was sent; without a cap Edge
+        // lets it grow to several GB (a 1.3.0 report: 5 GB and growing). 512 MB; a bigger one is trimmed at start
         string a = "--app=" + url + " --user-data-dir=" + Quote(profile) + " --start-maximized --no-first-run"
-                   + " --no-default-browser-check --disable-sync --disable-features=msImplicitSignin,msEdgeWelcomePage";
+                   + " --no-default-browser-check --disable-sync --disable-features=msImplicitSignin,msEdgeWelcomePage"
+                   + " --disk-cache-size=536870912";
         try
         {
             ProcessStartInfo psi = new ProcessStartInfo(browser, a);

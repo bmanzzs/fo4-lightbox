@@ -5,7 +5,7 @@ See a mesh the way Fallout 4 renders it, without loading the game.
 Lightbox reads your own Fallout 4 install and draws a NIF with the game's materials, weather, time of day,
 imagespace and lighting maths. Open any mesh, wear it, drop it into a real cell and walk around in it.
 
-Version 1.3.0 · Windows 10 / 11 · GPL-3.0 · no F4SE · writes nothing to your game folder
+Version 1.3.1 · Windows 10 / 11 · GPL-3.0 · no F4SE · writes nothing to your game folder
 
 ## Run it
 
@@ -66,7 +66,8 @@ Version 1.3.0 · Windows 10 / 11 · GPL-3.0 · no F4SE · writes nothing to your
 
 **Models**
 - Any NIF from loose files or BA2 archives, in the game's load order, or a file dropped from anywhere.
-- Search by file name or by the in-game name of armour and clothing.
+- Search by file name or by the in-game name of what uses the mesh: armour and clothing, furniture, containers,
+  doors, weapons, terminals and other objects ("chair", "nuka machine").
 - Reference bodies: male or female, bare or in the Vault 111 suit, Road Leathers or Radstag Hide.
   A loose CBBE body is detected and can be switched on.
 - Worn items hang where the game hangs them (skin weights or the `Prn` bone).
@@ -85,8 +86,11 @@ Version 1.3.0 · Windows 10 / 11 · GPL-3.0 · no F4SE · writes nothing to your
 - One-click poses: bind pose, relaxed idle, walk, jog, run, sprint.
 
 **World**
-- Any cell from your load order, interior or exterior, mods included (1 cell, 3×3 or 5×5).
-- Placed objects with their material swaps, landscape with blended ground layers, water planes.
+- Any cell from your load order, interior or exterior, mods included (1 cell, 3×3 or 5×5); the cell search names
+  the DLC or mod a cell comes from.
+- Placed objects with their material swaps and paint colours (crates, containers, cars), landscape with blended
+  ground layers, water planes. Interiors take their lighting template's fog and light as the game does.
+- Rest the mouse on a placed object to see its EditorID, record type, FormID and file.
 - Every placed light, with its colour, radius, spotlight cone and flags.
 - Shortcut buttons for seven places and an empty studio floor.
 - Plain backgrounds, the slim buttons either side of the places: NifSkope's black or Outfit Studio's grey, exact on
@@ -227,6 +231,7 @@ FO4 Lightbox stands on the work of a lot of generous people: modders who mapped 
 - **MANOLOV02**: [Nif Explorer](https://www.nexusmods.com/fallout4/mods/108129), [FO4_Base_Library](https://github.com/MANOLOV02/FO4_Base_Library), [Wardrobe Manager](https://www.nexusmods.com/fallout4/mods/94884) and [NPC Manager](https://www.nexusmods.com/fallout4/mods/105008). Their documented findings on the game's image space and weather records were a valuable cross-check.
 - **The [Mod Organizer 2](https://www.modorganizer.org/) team** ([source](https://github.com/ModOrganizer2/modorganizer)): Lightbox reads your MO2 profile straight from its files.
 - **The [OpenMW](https://openmw.org/) team**: their open engine documents how this engine family moves the sun across the sky.
+- **Julian Thomas and the OpenFO4 contributors**: [OpenFO4](https://github.com/julianthomas04/OpenFO4). Their open engine pointed Lightbox at placed objects' colour remapping, interior lighting-template inheritance and the light records' shading switches.
 
 ### Rendering research
 
@@ -246,6 +251,7 @@ Each one written fresh from the published method:
 
 - **NeinGaming**: found Lightbox's first real bug (the endless reload under Mod Organizer 2) and suggested a manual reload. Both made it into 1.1.0.
 - **stalkerVlad1**: found that the animation search gave no sign of life (an empty box opened nothing, a failed search stayed silent). Fixed in 1.1.0.
+- **MONSTERaider**: found that the first start of 1.2.0 and 1.3.0 could stop the viewer's server under its open window (it then waited on "Loading reference" for ever), and that the window's browser cache grew past 5 GB. Both fixed in 1.3.1.
 
 ### Made by
 

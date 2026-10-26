@@ -933,8 +933,17 @@ the sun disc (one hour measured).
   orbit with y and z fixed, where orbit goes +1 at sunrise to -1 at sunset. A straight line is a great circle through
   east and west, tilted from overhead. The 10:00 disc fits that shape with X 600 and |y| 325 at orbit 0.47, which is
   10:10 on a 07:00-19:00 day; z / |y| = 0.89 is still unexplained.
+- **Afternoon light, measured 2026-10-20** (Vault 111 platform, third-person frames, GameDriver run
+  20261020_214834_v111_compare2b; 49-candidate light sweeps scored by blurred log-luminance, two frames at 15:00):
+  - 12:04 azimuth 163 (elevation poorly fixed, 38-48); 15:06 azimuth 211-213, elevation 36-37; 17:04 azimuth 230,
+    elevation about 18-25.
+  - The light's azimuth equals the disc's at all three hours, and its elevation is about 0.79 x the disc's (12:00
+    45 / 57, 14:00 45 / 56.6, 15:00 37 / 47.4). The fitted path above gives 15:00 217 / 45 and 17:00 250 / 40, so
+    afternoon shadows in the viewer are too short and turned too far west.
+  - Not applied yet: the 10-05 fit's 07:00 value (33 degrees, from Bman's dawn shots) does not fit "0.79 x the disc"
+    (the disc is on the horizon then). Morning hours need their own measurement before the path changes.
 - Still open:
-  - the light direction at 08/10/16 h (needs a view with more shadow edges at those hours);
+  - the light direction at 08/10 h, and the 07:00 conflict above;
   - the disc between 06:00 and 09:00 and after 18:00 (blocked by trees from that spot);
   - the game's lens-flare star around the disc.
 - The GameDriver run rules learned here: never lift the player (`tcl` has no effect in Bman's game, and a fall
@@ -1047,3 +1056,41 @@ Not done: levels 16 and 32 (the farthest mountains), the game's LOD fade, tree L
 - A hidden node hides its children in the game, but 8 vanilla meshes keep visible shapes under hidden DamageStage
   nodes, and `carmini01hulk.nif` keeps its whole body there: the engine shows the stage node that matches the object's
   damage stage, so the viewer does not hide by parent flags in general.
+
+## 28. Colour remapping, lighting templates, light shading switches (2026-10-24)
+
+Pointed at by OpenFO4 (github.com/julianthomas04/OpenFO4); written fresh here and checked against Fallout4.esm.
+Confidence: high for the record data; medium for the MODC band rule (one crate and one truck measured in game) and for
+the light switches (OpenFO4's reading, not measured in game).
+
+- **MODC (colour remapping index).** A base record's MODC float (right after MODT) colours every greyscale-to-palette
+  material of its model. 144 vanilla bases carry one (89 STAT: crates, shipping containers, signs; 55 MSTT: every
+  station wagon). A material swap's own index (MSWP CNAM) wins for the materials it swaps (2 vanilla bases have both).
+  The cell sends it as `remap`; world.js keeps one template per model + swap + remap and asks `/api/nif?remap=`.
+  - **It is not the palette row as it is.** The vanilla palettes are bands of 16 rows (one colour scheme each: a
+    swatch row, clean paint at the top, rust at the bottom; crates 128 rows = 8 bands, station wagons 256 = 16). The
+    index picks the band and the game shows the row three quarters down it: scene.py `_band_row`,
+    (floor(index x bands) + 0.75) / bands.
+  - Measured 2026-10-24 against GameDriver frames: the Vault-Tec crates at Vault 111 (MODC 0.873) are blue with rust
+    in the game (run 20261020_214834, fp.png); the plain index is the blue band's last rust row and bleeds into the
+    next band's green swatch, the band rule gives row 108 = the game's look. Every vanilla station wagon's MODC
+    already sits at band + 0.75, and the crates' names fit their bands (0.745 aqua, 0.866-0.873 blue, 1.0 green).
+  - A material's own GrayscaleToPaletteScale is the row as it is: a Concord truck (PickUpTruck02A_Static, swapped
+    material at 0.175) matches the game unchanged (run 20261008_064834, h12.png), and a uniform 4-row shift that fixed
+    the crate turned that truck white. So only MODC goes through the band rule; MSWP CNAM and hair colours (CLFM)
+    stay direct (unmeasured).
+- **Interior lighting templates.** All 1,194 vanilla interiors have an XCLL; 319 also name a template (LTMP), e.g.
+  Vault111Cryo -> Vault_CryoLT. XCLL's Inherits (u32 at 88; FO4Edit's flag order) names the fields taken from the
+  template's DATA instead: 0 ambient colour, 1 directional colour, 2 fog colours (near 8, far 72, high 100-107),
+  3 fog near, 4 fog far, 5 directional rotation, 6 directional fade, 7 clip distance, 8 fog power, 9 fog max,
+  10 light fade distances. In the templated cells the cell's own copy of an inherited field differs from the
+  template's 90 % of the time (stale), so the template matters. The viewer used to ignore the template whenever the
+  cell had an XCLL, i.e. always.
+  - An LGTM keeps its six directional ambient colours in a DALC record of its own; its DATA 40-71 is not them.
+  - No Inherits bit names the directional ambient colours: the cell's own stay. Unmeasured (in 75 of the 135 cells
+    with bit 0 they differ from the template's); a game shot of such a cell would settle it.
+  - Cells without LTMP set the bits too (875 of them) but have no template; no Default Object names one. They keep
+    their own values.
+- **LIGH shading switches** (DATA flags): 0x10000 Attenuation Only (colour x attenuation, no direction or specular:
+  as Ambient Only), 0x40000 Ignore Roughness (plain Lambert, no sheen), 0x80000 No Rim Lighting (no sheen term).
+  Vanilla: 8, 33 and 88 lights, mostly effect lights. OpenFO4's reading; not measured.

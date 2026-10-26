@@ -178,6 +178,9 @@ input[type=range]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 4px rg
 .chip { font-size: 10px; line-height: 16px; padding: 0 7px; border-radius: 9px; background: rgba(255,255,255,.055); color: #a9b1bc; white-space: nowrap; }
 .chip.lead { background: color-mix(in srgb, var(--c, #8b939e) 17%, transparent); color: color-mix(in srgb, var(--c, #8b939e) 75%, white); }
 .chip.dlc { background: rgba(232,176,74,.12); color: #f0c977; }
+.chip.odlc { background: rgba(110,170,240,.13); color: #9cc8f5; }
+.hovertip { position: fixed; z-index: 60; pointer-events: none; padding: 3px 8px; border-radius: 5px; font-size: 11px;
+  line-height: 15px; white-space: pre; background: rgba(14,16,19,.92); color: #d8dde3; border: 1px solid rgba(255,255,255,.08); }
 .hit:hover, .hit.act { background: rgba(255,255,255,.045); }
 .hit.act { box-shadow: inset 2px 0 0 var(--accent); }
 .hit .wear { width: 30px; height: 30px; padding: 6px; border-radius: 8px; background: transparent; border: 1px solid transparent; color: var(--dim); opacity: 0; transition: opacity .1s; }
@@ -754,7 +757,7 @@ body.capture #dataNote { display: none !important; }
 <template id="tplAbout">
   <img class="aboutart" src="about.jpg" alt="FO4 Lightbox">
   <h3>FO4 <b>Lightbox</b></h3>
-  <div class="ver">version <span data-ver>1.3.0</span> · GPL-3.0 · made by Bman</div>
+  <div class="ver">version <span data-ver>1.3.1</span> · GPL-3.0 · made by Bman</div>
   <p>A model viewer for Fallout 4 that actually tries to look like the game. Open any mesh from your install, throw it on a body,
     drop it into a real cell and check it under the game's own weather, time of day and lighting. You can even walk around in it.
     The sun, shadows, fog and tonemapping were tuned against real in-game screenshots, not eyeballed.</p>
@@ -774,6 +777,7 @@ body.capture #dataNote { display: none !important; }
     <li><b>MANOLOV02</b>: <a href="https://www.nexusmods.com/fallout4/mods/108129" target="_blank" rel="noopener noreferrer">Nif Explorer</a>, <a href="https://github.com/MANOLOV02/FO4_Base_Library" target="_blank" rel="noopener noreferrer">FO4_Base_Library</a>, <a href="https://www.nexusmods.com/fallout4/mods/94884" target="_blank" rel="noopener noreferrer">Wardrobe Manager</a> and <a href="https://www.nexusmods.com/fallout4/mods/105008" target="_blank" rel="noopener noreferrer">NPC Manager</a>. Their documented findings on the game's image space and weather records were a valuable cross-check.</li>
     <li><b>The <a href="https://www.modorganizer.org/" target="_blank" rel="noopener noreferrer">Mod Organizer 2</a> team</b> (<a href="https://github.com/ModOrganizer2/modorganizer" target="_blank" rel="noopener noreferrer">source</a>): Lightbox reads your MO2 profile straight from its files.</li>
     <li><b>The <a href="https://openmw.org/" target="_blank" rel="noopener noreferrer">OpenMW</a> team</b>: their open engine documents how this engine family moves the sun across the sky.</li>
+    <li><b>Julian Thomas and the OpenFO4 contributors</b>: <a href="https://github.com/julianthomas04/OpenFO4" target="_blank" rel="noopener noreferrer">OpenFO4</a>. Their open engine pointed Lightbox at placed objects' colour remapping, interior lighting-template inheritance and the light records' shading switches.</li>
   </ul>
   <h5>Rendering research</h5>
   <p class="cnote">Each one written fresh from the published method:</p>
@@ -792,6 +796,7 @@ body.capture #dataNote { display: none !important; }
   <ul class="credits">
     <li><b>NeinGaming</b>: found Lightbox's first real bug (the endless reload under Mod Organizer 2) and suggested a manual reload. Both made it into 1.1.0.</li>
     <li><b>stalkerVlad1</b>: found that the animation search gave no sign of life (an empty box opened nothing, a failed search stayed silent). Fixed in 1.1.0.</li>
+    <li><b>MONSTERaider</b>: found that the first start of 1.2.0 and 1.3.0 could stop the viewer's server under its open window (it then waited on "Loading reference" for ever), and that the window's browser cache grew past 5 GB. Both fixed in 1.3.1.</li>
   </ul>
   <h5>Made by</h5>
   <ul class="credits">

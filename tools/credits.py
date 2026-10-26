@@ -53,6 +53,9 @@ GROUPS = [
         "its files.",
         "**The [OpenMW](https://openmw.org/) team**: their open engine documents how this engine family moves the "
         "sun across the sky.",
+        "**Julian Thomas and the OpenFO4 contributors**: [OpenFO4](https://github.com/julianthomas04/OpenFO4). "
+        "Their open engine pointed Lightbox at placed objects' colour remapping, interior lighting-template "
+        "inheritance and the light records' shading switches.",
     ]),
     ('Rendering research', 'Each one written fresh from the published method:', [
         "**John Hable**: the filmic \"Uncharted 2\" tonemap curve the game uses "
@@ -93,6 +96,9 @@ GROUPS = [
         "manual reload. Both made it into 1.1.0.",
         "**stalkerVlad1**: found that the animation search gave no sign of life (an empty box opened nothing, a "
         "failed search stayed silent). Fixed in 1.1.0.",
+        "**MONSTERaider**: found that the first start of 1.2.0 and 1.3.0 could stop the viewer's server under its open "
+        "window (it then waited on \"Loading reference\" for ever), and that the window's browser cache grew past 5 GB. "
+        "Both fixed in 1.3.1.",
     ]),
     ('Made by', None, [
         "**Bman**: the idea, the direction and every design call, plus hours of in-game calibration screenshots, so "
@@ -118,6 +124,9 @@ IN_CODE = [
     "`web/js/renderer.js`: clustered placed lights (Olsson, Billeter, Assarsson); Halton jitter; shadow maps with "
     "percentage-closer filtering.",
     "`docs/engine-notes.md` Section 25: the sun path, after OpenMW's documented model.",
+    "`server/esm_world.py` (`_color_remap`, `_inherit_lighting`), `web/js/world.js` / `web/js/shaders.js` (the LIGH "
+    "shading switches): features OpenFO4 pointed at, written fresh and checked against Fallout4.esm "
+    "(engine-notes Section 28).",
     "`docs/prior-art.md` (not shipped): the study of Nif Explorer / FO4_Base_Library (MANOLOV02), the fo76utils "
     "NifSkope fork and Outfit Studio.",
 ]

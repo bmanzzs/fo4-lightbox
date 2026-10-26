@@ -460,9 +460,36 @@ def scene_particles(nif, par, vfs, log, swaps=None):
 # dome (a backdrop for the descent) would hang over the platform. Checked against the game 2026-10-08.
 END_STATE_HIDDEN = {'meshes\\interiors\\vault\\rooms\\vltelevator\\vltelevatorexterior.nif': {'m_SkyDome'}}
 
+_PALETTE_ROWS = {}
 
-def build_scene(raw, vfs, name='', swaps=None, remap=None, compact=True, placed=False, cut=None):
-    """remap: a palette row for greyscale-to-palette materials (an actor's hair colour).
+
+def _band_row(vfs, path, index):
+    """The palette row a colour remapping index (MODC) shows: the vanilla palettes are bands of 16 rows (a colour
+    scheme each, clean paint at the top, rust at the bottom); the index picks the band and the game shows the row three
+    quarters down it. Measured 2026-10-24 on the Vault-Tec crates at Vault 111 (MODC 0.873 in a 128-row palette: the
+    game's blue-with-rust is row 108, the plain index the band's last rust row); every vanilla station wagon's MODC
+    already sits at band + 0.75. Materials' own GrayscaleToPaletteScale is used as it is (a Concord truck at 0.175
+    matches the game unchanged). engine-notes Section 28."""
+    if not path:
+        return index
+    rows = _PALETTE_ROWS.get(path)
+    if rows is None:
+        try:
+            head = vfs.read(path)[:20]
+            rows = int.from_bytes(head[12:16], 'little') if head[:4] == b'DDS ' else 0
+        except Exception:
+            rows = 0
+        _PALETTE_ROWS[path] = rows
+    bands = rows // 16
+    if bands < 2:
+        return index
+    band = min(bands - 1, max(0, int(index * bands)))
+    return (band + 0.75) / bands
+
+
+def build_scene(raw, vfs, name='', swaps=None, remap=None, compact=True, placed=False, cut=None, remap_bands=False):
+    """remap: a palette row for greyscale-to-palette materials (an actor's hair colour, a placed object's MODC).
+    remap_bands: remap is a colour remapping index (MODC) that picks a band of the palette (_band_row).
     swaps: {normalised original material path: {'new': path, 'remap': float or None}}, from plugin material swaps.
     compact: vertex data in the NIF's own formats (half-float positions and UVs, byte normals and tangents, 16-bit
     indices; 'fmt' on each shape says which), which the browser reads as they are: about half the bytes of floats.
@@ -534,8 +561,9 @@ def build_scene(raw, vfs, name='', swaps=None, remap=None, compact=True, placed=
         sh = nif.blocks[b['shader']] if b['shader'] >= 0 else None
         if sh and sh['type'] == 'BSLightingShaderProperty':
             mat = lighting_material(nif, sh, ap, vfs, log, swaps)
-            if remap is not None and mat.get('greyscale'):
-                mat['greyscale_scale'] = remap
+            if remap is not None and mat.get('greyscale') and mat.get('remap_index') is None:
+                mat['greyscale_scale'] = (_band_row(vfs, (mat.get('textures') or {}).get('greyscale'), remap)
+                                          if remap_bands else remap)    # (a swap's own index wins: it was set above)
         elif sh and sh['type'] == 'BSEffectShaderProperty':
             mat = effect_material(sh, ap, vfs, log, swaps)
         else:

@@ -30,6 +30,9 @@ _LOCALIZED = 0x80            # TES4 header flag: FULL holds a string-table id
 MODEL_TYPES = (b'STAT', b'SCOL', b'MSTT', b'FURN', b'CONT', b'DOOR', b'LIGH', b'ACTI', b'TREE', b'FLOR', b'MISC',
                b'WEAP', b'ARMO', b'BOOK', b'ALCH', b'AMMO', b'KEYM', b'NOTE', b'TERM', b'IDLM', b'BNDS', b'MOVS',
                b'ADDN', b'PKIN', b'TACT', b'CMPO')
+# bases whose in-game name (FULL) the mesh search shows next to the model they place (armour has its own path)
+NAMED_TYPES = frozenset((b'STAT', b'SCOL', b'MSTT', b'FURN', b'CONT', b'DOOR', b'LIGH', b'ACTI', b'TREE', b'FLOR', b'MISC',
+                         b'WEAP', b'BOOK', b'ALCH', b'AMMO', b'KEYM', b'NOTE', b'TERM', b'MOVS', b'TACT', b'CMPO'))
 OTHER_TYPES = (b'LTEX', b'TXST', b'LGTM', b'WATR', b'ARMA', b'OMOD', b'MSWP', b'KYWD', b'RACE', b'NPC_', b'HDPT', b'CLFM',
                b'GDRY')
 # armour OMOD properties that change what is drawn (FO4Edit armour property list)
@@ -76,6 +79,14 @@ def _model_path(p):
     if not p.lower().startswith('meshes\\'):
         p = 'meshes\\' + p
     return p
+
+
+def _color_remap(subs):
+    """A base object's MODC, the colour remapping index of its model: the row of the greyscale-to-palette gradient its
+    palette materials use (144 vanilla bases: crates, signs, every station wagon). A material swap's own index (MSWP
+    CNAM) wins for the materials it swaps."""
+    v = next((v for k, v in subs if k == 'MODC' and len(v) >= 4), None)
+    return round(struct.unpack_from('<f', v)[0], 4) if v is not None else None
 
 
 def _tex_path(p):
@@ -612,8 +623,20 @@ class WorldDB:
         p, pos = e
         sig, flags, raw, body = self._body(p, pos)
         subs = list(_subrecords(body))
-        model = next((_cstr(v) for k, v in subs if k == 'MODL'), '')
         edid = next((_cstr(v) for k, v in subs if k == 'EDID'), '')
+        base_swaps = None
+        if sig == b'ARMO':
+            # a placed armour draws its world (ground) model: MOD2 (male), else MOD4 (female), with that model's own
+            # material swaps (MO2S / MO4S). Its MODL entries are the 4-byte ARMA FormIDs of the addon list, not paths
+            # (BotC's A.R.C. in Sigma's display case was dropped for that)
+            model = ''
+            for mk, sk in (('MOD2', 'MO2S'), ('MOD4', 'MO4S')):
+                model = next((_cstr(v) for k, v in subs if k == mk), '')
+                if model:
+                    base_swaps = next((_swap_list(p, v) for k, v in subs if k == sk and len(v) >= 4), None)
+                    break
+        else:
+            model = next((_cstr(v) for k, v in subs if k == 'MODL'), '')
         # Is Marker (XMarker, COC and heading markers, scene flags...) and idle markers (IDLM, e.g. Dogmeat's sniff
         # spots, a blue dog figure in the editor): the game never draws these. Everything else draws its NIF
         # (BlackPlane, the Freedom Trail signs live under markers\ too); editor-only shapes (EditorMarker) are
@@ -631,6 +654,11 @@ class WorldDB:
                                          if k == 'MODS' and len(v) >= 4), None)
             if sw:
                 item['swap'] = '%08X' % sw
+            elif base_swaps:
+                item['swap'] = ','.join(base_swaps)
+            rm = _color_remap(subs) if sig != b'ARMO' else None
+            if rm is not None:
+                item['remap'] = rm
             if sig == b'LIGH':
                 item['light'] = self._light(subs, r, p)
             if sig == b'DOOR':                     # game mode opens it (E); a load door (XTEL) leads to another cell
@@ -733,6 +761,7 @@ class WorldDB:
                     continue
                 m = _model_path(model)
                 sw = next((pp.global_fid(struct.unpack_from('<I', x)[0]) for kk, x in psubs if kk == 'MODS' and len(x) >= 4), None)
+                rm = _color_remap(psubs)
                 for i in range(len(v) // 28):
                     px, py, pz, rx, ry, rz, sc = struct.unpack_from('<7f', v, i * 28)
                     lp = [px * r['scale'], py * r['scale'], pz * r['scale']]
@@ -741,6 +770,8 @@ class WorldDB:
                           'model': m, 'pos': wp, 'rot': r['rot'], 'rot2': [rx, ry, rz], 'scale': r['scale'] * sc}
                     if sw:
                         it['swap'] = '%08X' % sw
+                    if rm is not None:
+                        it['remap'] = rm
                     out.append(it)
         return out
 
@@ -875,7 +906,8 @@ class WorldDB:
 
     # ---- lighting and water ------------------------------------------------------------------------------
     def _lighting(self, c):
-        """Interior lighting from XCLL (or the lighting template's DATA when the cell has none)."""
+        """Interior lighting: the cell's XCLL, with every field its Inherits flags name taken from its lighting
+        template (LTMP -> LGTM DATA). A cell without XCLL takes the template whole."""
         if not c['interior']:
             return None
         p, pos = c['recs'][-1]
@@ -884,13 +916,26 @@ class WorldDB:
         xcll = next((v for k, v in subs if k == 'XCLL'), None)
         ltmp = next((struct.unpack_from('<I', v)[0] for k, v in subs if k == 'LTMP' and len(v) >= 4), None)
         xcim = next((struct.unpack_from('<I', v)[0] for k, v in subs if k == 'XCIM' and len(v) >= 4), None)
-        source = 'XCLL'
-        if xcll is None and ltmp:
+        tdata = tdalc = tedid = None
+        if ltmp:
             tsig, tp, tsubs = self._base(p.global_fid(ltmp))
             if tsig == b'LGTM':
-                xcll = next((v for k, v in tsubs if k == 'DATA'), None)
-                source = 'lighting template'
-        out = {'source': source if xcll else None, 'imagespace': '%08X' % p.global_fid(xcim) if xcim else None}
+                tdata = next((v for k, v in tsubs if k == 'DATA'), None)
+                tdalc = next((v for k, v in tsubs if k == 'DALC' and len(v) >= 24), None)
+                tedid = _edid(tsubs)
+        # the six directional ambient colours: in the cell's XCLL at 40; an LGTM keeps them in their own DALC record
+        # (its DATA 40-71 is not them). No Inherits bit names them: the cell's own stay (game behaviour unmeasured)
+        source, inherited = 'XCLL', []
+        dalc = xcll[40:64] if xcll is not None and len(xcll) >= 64 else None
+        if xcll is None and tdata is not None:
+            xcll, source = tdata, f'lighting template {tedid}'
+            dalc = tdalc[:24] if tdalc is not None else tdata[40:64]
+        elif xcll is not None and tdata is not None and len(xcll) >= 92:
+            xcll, inherited = _inherit_lighting(xcll, tdata)
+            if inherited:
+                source = f'XCLL + lighting template {tedid}'
+        out = {'source': source if xcll else None, 'imagespace': '%08X' % p.global_fid(xcim) if xcim else None,
+               'template': tedid, 'inherited': inherited}
         if xcll and len(xcll) >= 92:
             f = lambda o: struct.unpack_from('<f', xcll, o)[0]
             i32 = lambda o: struct.unpack_from('<i', xcll, o)[0]
@@ -898,9 +943,11 @@ class WorldDB:
                 'ambient': _rgba(xcll, 0), 'directional': _rgba(xcll, 4), 'fog_near_color': _rgba(xcll, 8),
                 'fog_near': f(12), 'fog_far': f(16), 'dir_rot_xy': i32(20), 'dir_rot_z': i32(24), 'dir_fade': f(28),
                 'fog_clip': f(32), 'fog_power': f(36),
-                'dalc': {n: _rgba(xcll, 40 + 4 * i) for i, n in enumerate(['X+', 'X-', 'Y+', 'Y-', 'Z+', 'Z-'])},
+                'dalc': ({n: _rgba(dalc, 4 * i) for i, n in enumerate(['X+', 'X-', 'Y+', 'Y-', 'Z+', 'Z-'])}
+                         if dalc is not None and len(dalc) >= 24 else None),
                 'fog_far_color': _rgba(xcll, 72) if len(xcll) >= 76 else None,
                 'fog_max': f(76) if len(xcll) >= 80 else 1.0,
+                'light_fade': [f(80), f(84)] if len(xcll) >= 88 else None,
             })
         return out
 
@@ -916,6 +963,30 @@ class WorldDB:
             if wh is not None and abs(wh) < 1e6 and cc['grid']:
                 out.append({'grid': list(cc['grid']), 'height': wh})
         return out
+
+
+# XCLL Inherits (u32 at 88; FO4Edit's flag names, in bit order): which byte ranges of XCLL come from the lighting
+# template's DATA instead (same layout up to 92; the high fog colours sit at 100-107 in the long form). In vanilla 319
+# interiors have a template, and their own copies of inherited fields are stale ~90% of the time (e.g. Vault111Cryo,
+# 0x6FC: fog, directional rotation and fade, clip distance, fog max and light fade from Vault_CryoLT).
+_INHERITS = [('ambient', [(0, 4)]), ('directional', [(4, 4)]), ('fog colours', [(8, 4), (72, 4), (100, 8)]),
+             ('fog near', [(12, 4)]), ('fog far', [(16, 4)]), ('directional rotation', [(20, 8)]),
+             ('directional fade', [(28, 4)]), ('clip distance', [(32, 4)]), ('fog power', [(36, 4)]),
+             ('fog max', [(76, 4)]), ('light fade distances', [(80, 8)])]
+
+
+def _inherit_lighting(xcll, tdata):
+    """(merged XCLL bytes, names of the inherited fields)."""
+    bits = struct.unpack_from('<I', xcll, 88)[0]
+    out, names = bytearray(xcll), []
+    for b, (name, spans) in enumerate(_INHERITS):
+        if not bits >> b & 1:
+            continue
+        names.append(name)
+        for o, n in spans:
+            if o + n <= len(out) and o + n <= len(tdata):
+                out[o:o + n] = tdata[o:o + n]
+    return bytes(out), names
 
 
 def _record(d, pos):
@@ -1050,7 +1121,8 @@ def armor_search(self, q, limit=150):
 
 def model_names(self):
     """Model path (normalised, lower case) -> [(in-game name, EDID)] of every armour (clothing included) whose world
-    model or armature (male / female, first person) uses it: the mesh search finds a NIF by the name the game shows."""
+    model or armature (male / female, first person) uses it, then every other named base placing it (NAMED_TYPES):
+    the mesh search finds a NIF by the name the game shows."""
     with self.lock, self.files():
         if self._model_names is not None:
             return self._model_names
@@ -1078,6 +1150,21 @@ def model_names(self):
                         for kk, mv in asubs:
                             if kk in ('MOD2', 'MOD3', 'MOD4', 'MOD5'):
                                 add(_cstr(mv), it)
+        # every other placeable base with an in-game name (furniture, containers, doors, activators, weapons, misc
+        # items, terminals...): searching "chair" finds the furniture the game calls Chair. Statics rarely have one
+        for fid, sig in self.base_sig.items():
+            if sig not in NAMED_TYPES:
+                continue
+            p, pos = self.base[fid]
+            try:
+                subs = list(_subrecords(self._body(p, pos)[3]))
+            except Exception:
+                continue
+            full = next((v for k, v in subs if k == 'FULL'), None)
+            model = next((_cstr(v) for k, v in subs if k == 'MODL'), '')
+            if full is None or not model:
+                continue
+            add(model, {'name': self._text(p, full), 'edid': next((_cstr(v) for k, v in subs if k == 'EDID'), '')})
         self._model_names = names
         return names
 

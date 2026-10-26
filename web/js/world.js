@@ -80,6 +80,10 @@ export class CellLoader {
           color: lin(L.color).map(v => v * Math.max(0, L.fade ?? 1)),
           att: [L.constant ?? 0, L.scalar || 1, L.exponent || 2],
           spec: L.flags & 0x8000 ? 0 : 1, ambient: L.flags & 0x100000 ? 1 : 0,
+          // shading switches, as OpenFO4 reads them (not measured here): 1 Attenuation Only (0x10000: colour x
+          // attenuation, no direction or specular), 2 Ignore Roughness (0x40000: plain Lambert), 4 No Rim Lighting
+          // (0x80000: no sheen term)
+          mode: (L.flags & 0x10000 ? 1 : 0) | (L.flags & 0x40000 ? 2 : 0) | (L.flags & 0x80000 ? 4 : 0),
           dir, cone: spot ? Math.cos(half) : -2, falloff: Math.max(0.01, L.falloff || 1),
           shadow, near: Math.max(0, L.near || 0), bias: L.shadow_bias ?? 1,
           // §24 a spotlight's own god rays (GDRY): colours x scales, phases, intensity, near clip of the rays
@@ -100,12 +104,13 @@ export class CellLoader {
     const focus = this.focus = c.spawn?.pos || this.focusPoint(c);
     if (camera) camera(focus, c.cell.interior);
 
-    // one template per model and material swap (a STAT's MODS or the reference's own, e.g. the blue cryo pipes)
+    // one template per model, material swap (a STAT's MODS or the reference's own, e.g. the blue cryo pipes) and colour
+    // remap (the base's MODC: the paint of a crate or a station wagon)
     const groups = new Map();
     for (const r of c.refs) {
       if (!r.model) continue;
-      const k = r.model.toLowerCase() + '|' + (r.swap || '');
-      if (!groups.has(k)) groups.set(k, { path: r.model, swap: r.swap || '', items: [], dist: Infinity });
+      const k = r.model.toLowerCase() + '|' + (r.swap || '') + '|' + (r.remap ?? '');
+      if (!groups.has(k)) groups.set(k, { path: r.model, swap: r.swap || '', remap: r.remap ?? null, items: [], dist: Infinity });
       const g = groups.get(k);
       g.items.push(r);
       g.dist = Math.min(g.dist, Math.hypot(r.pos[0] - focus[0], r.pos[1] - focus[1], r.pos[2] - focus[2]));
@@ -122,7 +127,7 @@ export class CellLoader {
       while (queue.length && token === this.token) {
         const g = queue.shift();
         try {
-          const req = this.api(`nif?path=${encodeURIComponent(g.path)}${g.swap ? `&swap=${g.swap}` : ''}&placed=1`);
+          const req = this.api(`nif?path=${encodeURIComponent(g.path)}${g.swap ? `&swap=${g.swap}` : ''}${g.remap != null ? `&remap=${g.remap}` : ''}&placed=1`);
           if (!queue.length) startLod();          // the last model requests are out: the distant land's go after them
           const sc = await req;
           if (token !== this.token) return;
@@ -282,6 +287,10 @@ export function interiorEnv(lt, ims) {
     e.sunColor = lin(lt.directional || [0, 0, 0]).map(v => v * Math.max(0, lt.dir_fade || 0));
     const fogN = lin(lt.fog_near_color || [0, 0, 0]), fogF = lin(lt.fog_far_color || lt.fog_near_color || [0, 0, 0]);
     e.skyUpper = e.skyLower = e.horizon = fogF;
+    // beyond the room's walls the screen shows near-black, as the game's interiors do (the fog colour there, raised
+    // by the exposure of a dark room, read as a bright blue-grey void around every interior seen from outside). Drawn
+    // like a backdrop after the tonemap: the exposure still measures the fog colour, so the room keeps its look
+    e.voidColor = [0.018, 0.016, 0.018];
     if (lt.fog_far > lt.fog_near) {
       e.fog = { near: lt.fog_near, far: lt.fog_far, power: lt.fog_power || 1, max: lt.fog_max ?? 1, high_density_scale: 1 };
       e.fogNear = e.fogNearHigh = fogN; e.fogFar = e.fogFarHigh = fogF;

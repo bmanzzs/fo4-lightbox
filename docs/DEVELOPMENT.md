@@ -857,6 +857,7 @@ This section, the README's, Help > About and the Nexus page draft are written by
 - **MANOLOV02**: [Nif Explorer](https://www.nexusmods.com/fallout4/mods/108129), [FO4_Base_Library](https://github.com/MANOLOV02/FO4_Base_Library), [Wardrobe Manager](https://www.nexusmods.com/fallout4/mods/94884) and [NPC Manager](https://www.nexusmods.com/fallout4/mods/105008). Their documented findings on the game's image space and weather records were a valuable cross-check.
 - **The [Mod Organizer 2](https://www.modorganizer.org/) team** ([source](https://github.com/ModOrganizer2/modorganizer)): Lightbox reads your MO2 profile straight from its files.
 - **The [OpenMW](https://openmw.org/) team**: their open engine documents how this engine family moves the sun across the sky.
+- **Julian Thomas and the OpenFO4 contributors**: [OpenFO4](https://github.com/julianthomas04/OpenFO4). Their open engine pointed Lightbox at placed objects' colour remapping, interior lighting-template inheritance and the light records' shading switches.
 
 ### Rendering research
 
@@ -876,6 +877,7 @@ Each one written fresh from the published method:
 
 - **NeinGaming**: found Lightbox's first real bug (the endless reload under Mod Organizer 2) and suggested a manual reload. Both made it into 1.1.0.
 - **stalkerVlad1**: found that the animation search gave no sign of life (an empty box opened nothing, a failed search stayed silent). Fixed in 1.1.0.
+- **MONSTERaider**: found that the first start of 1.2.0 and 1.3.0 could stop the viewer's server under its open window (it then waited on "Loading reference" for ever), and that the window's browser cache grew past 5 GB. Both fixed in 1.3.1.
 
 ### Made by
 
@@ -893,6 +895,7 @@ Each one written fresh from the published method:
 - `web/js/shaders.js`: Hable tonemap; SAO (McGuire, Mara, Luebke); TAA (Karis, Salvi, Pettineo's Catmull-Rom read); specular anti-aliasing (Tokuyoshi, Kaplanyan); light shafts (Henyey-Greenstein, Rayleigh); the game's BRDF terms (Oren-Nayar, Blinn-Phong, Cook-Torrance, Schlick, Kajiya-Kay).
 - `web/js/renderer.js`: clustered placed lights (Olsson, Billeter, Assarsson); Halton jitter; shadow maps with percentage-closer filtering.
 - `docs/engine-notes.md` Section 25: the sun path, after OpenMW's documented model.
+- `server/esm_world.py` (`_color_remap`, `_inherit_lighting`), `web/js/world.js` / `web/js/shaders.js` (the LIGH shading switches): features OpenFO4 pointed at, written fresh and checked against Fallout4.esm (engine-notes Section 28).
 - `docs/prior-art.md` (not shipped): the study of Nif Explorer / FO4_Base_Library (MANOLOV02), the fo76utils NifSkope fork and Outfit Studio.
 
 ## Licence
@@ -1504,3 +1507,34 @@ What changed:
 - **Not mimicked:** Outfit Studio's material specular colour (Lightbox doesn't pass it) and its environment mask
   texture (Lightbox uses the specular map instead, which is the editor's own fallback). The skin tint stays (the
   editor shows raw skin textures).
+
+## 1.3.1 (2026-10-25)
+
+- **The launcher kept the server under an open window.** `launcher/Launcher.cs` used to stop the server as soon as
+  the Edge process it started exited. Edge hands its window to another process of its own and exits at once on a
+  fresh profile (a first start) and when it already runs on the profile: the page then hung on "Loading reference…"
+  (MONSTERaider's 1.3.0 report). Reproduced in a scratch profile with the 1.3.0 logic: the server was gone a minute
+  after a first start, window still open. Now "the window is open" = that process alive, or a visible app window of
+  any Edge / Chrome process whose command line names the viewer's profile (WMI, `ProfilePids`); ordinary browser
+  windows (" - Microsoft Edge") don't count. The server stops 8 s after the last one closes. Tested: first start on
+  a fresh profile, a start with Edge already running on the profile, a normal start; each kept the server up for
+  the minute the window was open and stopped it 8-9 s after the close. Found by the Darkroom session.
+  - The launcher reads `%LOCALAPPDATA%` from the environment (the server does too), so a test can point both at a
+    scratch folder.
+- **Browser cache capped at 512 MB** (`--disk-cache-size`); the 1.3.0 report had 5 GB. Edge trims a bigger cache
+  at start (tested: 186 MB to 5 MB with a 20 MB cap).
+- **Colour remapping (MODC), lighting templates, LIGH shading switches:** engine-notes Section 28.
+- **Mesh search names every placeable** (`esm_world.model_names`, NAMED_TYPES): furniture, containers, doors,
+  activators, weapons, misc items, terminals... by their FULL name; built with the first search (0.4 s).
+- **Cell search source chips** (`pluginChip` in main.js): official add-ons by their store names on a blue chip
+  (Automatron, Far Harbor, Nuka-World, the workshops, Creation Club), mods amber, Fallout4.esm grey.
+- **More folder words for the search tags** (`pathtags.js` WORDS, from Darkroom: the 80 most common unsplit folder
+  names across 41k placeable bases), e.g. "Light | Fixtures", "Modern | Domestic".
+- **Interiors seen from outside:** the surround is near-black (`env.voidColor`, drawn after the tonemap like a
+  plain backdrop, without the grid). Making the sky black instead let the eye adaptation brighten the room.
+- **Hover tip in cells:** the mouse resting 110 ms on a placed object names it (EditorID · type · FormID, file).
+  The pick reads back from the GPU, so it never runs per move.
+- **Placed armour draws** (`esm_world._expand`): an ARMO's MODL entries are the 4-byte ARMA FormIDs of its addon
+  list, so a placed armour (BotC's A.R.C. in Sigma's display case) was dropped. Its world model is MOD2, else MOD4,
+  with MO2S / MO4S as its material swaps. Reported by the Location - Bunker session.
+- Regression (42 shots) against the build before these: only the interior shots differ, in a few pixels of void.

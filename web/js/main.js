@@ -672,13 +672,23 @@ window.lightboxCells = cells;
 $('cellSearchIcon').outerHTML = UI_ICONS.search;
 const cellResults = $('cellResults');
 let cellTimer, cellHits = [], cellActive = -1, cellRadius = 1;
-const VANILLA = /^(fallout4|dlc\w+)\.esm$/i;
+// where a cell or record comes from, as a chip: the base game grey, official add-ons (the DLCs, Creation Club) blue by
+// their store names, mods amber
+const DLC_NAMES = { 'dlcrobot.esm': 'Automatron', 'dlcworkshop01.esm': 'Wasteland Workshop', 'dlccoast.esm': 'Far Harbor',
+  'dlcworkshop02.esm': 'Contraptions', 'dlcworkshop03.esm': 'Vault-Tec Workshop', 'dlcnukaworld.esm': 'Nuka-World',
+  'dlcultrahighresolution.esm': 'High-res textures' };
+function pluginChip(p) {
+  const k = p.toLowerCase(), official = DLC_NAMES[k] || (/^cc\w+\.es[lm]$/.test(k) ? 'Creation Club' : null);
+  if (k === 'fallout4.esm') return `<span class="chip lead">Fallout4</span>`;
+  return official ? `<span class="chip odlc" title="${esc(p)}">${esc(official)}</span>`
+    : `<span class="chip dlc">${esc(p.replace(/\.es[mpl]$/i, ''))}</span>`;
+}
 function cellRow(c, i) {
   const title = c.name || c.edid || (c.grid ? `${c.world} ${c.grid.join(', ')}` : c.formid);
   const chips = [`<span class="chip lead">${c.interior ? 'Interior' : esc(c.world || 'Exterior')}</span>`];
   if (c.grid) chips.push(`<span class="chip">${c.grid.join(', ')}</span>`);
   if (c.name && c.edid) chips.push(`<span class="chip">${esc(c.edid)}</span>`);
-  for (const p of c.plugins.filter(x => !VANILLA.test(x))) chips.push(`<span class="chip dlc">${esc(p.replace(/\.es[mpl]$/i, ''))}</span>`);
+  for (const p of new Set(c.plugins.filter(x => x.toLowerCase() !== 'fallout4.esm').map(pluginChip))) chips.push(p);
   return `<div class="hit ${c.interior ? 'cat-architecture' : 'cat-landscape'}" data-i="${i}" title="${esc(c.edid)} [${c.formid}]">` +
     `<span class="cat">${c.interior ? CAT_ICONS.architecture : CAT_ICONS.landscape}</span>` +
     `<span class="t"><div class="nm">${esc(title)}</div><div class="chips">${chips.join('')}</div></span><span></span></div>`;
@@ -980,7 +990,7 @@ async function toggleDoor(r) {
   let d = doors.get(r.ref);
   if (!d) {
     const tpl = R.cellTemplates.find(t => t.items && t.items.includes(r));
-    const sc = await api(`nif?path=${encodeURIComponent(r.model)}${r.swap ? `&swap=${r.swap}` : ''}&placed=1`);
+    const sc = await api(`nif?path=${encodeURIComponent(r.model)}${r.swap ? `&swap=${r.swap}` : ''}${r.remap != null ? `&remap=${r.remap}` : ''}&placed=1`);
     if (!(sc.sequences || []).some(q => /^open/i.test(q.name))) { toast(`${r.edid || 'This door'} does not open (no Open animation)`, 2500); return; }
     const m = R.addModel(sc, { role: 'door' });
     m.fixedWorld = refMatrix(r.pos, r.rot, r.rot2, r.scale || 1);
@@ -1077,7 +1087,7 @@ const itemResults = $('itemResults');
 let itemTimer, itemHits = [], itemActive = -1;
 state.item = null; state.itemVariant = ''; state.itemModels = [];
 function itemRow(it, i) {
-  const chips = [`<span class="chip ${VANILLA.test(it.plugin) ? 'lead' : 'dlc'}">${esc(it.plugin.replace(/\.es[mpl]$/i, ''))}</span>`,
+  const chips = [pluginChip(it.plugin),
     `<span class="chip">${esc(it.edid)}</span>`];
   return `<div class="hit cat-${/backpack/i.test(it.edid + it.name) ? 'backpack' : 'armor'}" data-i="${i}" title="${esc(it.edid)} [${it.formid}]">` +
     `<span class="cat">${/backpack/i.test(it.edid + it.name) ? CAT_ICONS.backpack : CAT_ICONS.armor}</span>` +
@@ -1156,7 +1166,7 @@ function renderItemCard() {
   const sw = (ids) => ids.map(id => a.swaps[id]?.edid || id).join(', ');
   const m = r.arma?.models || {};
   const swM = r.swaps(m.male?.swaps), swF = r.swaps(m.female?.swaps);
-  card.innerHTML = `<div class="ih"><b>${esc(a.name || a.edid)}</b><span class="chip ${VANILLA.test(a.plugin) ? 'lead' : 'dlc'}">${esc(a.plugin.replace(/\.es[mpl]$/i, ''))}</span></div>` +
+  card.innerHTML = `<div class="ih"><b>${esc(a.name || a.edid)}</b>${pluginChip(a.plugin)}</div>` +
     `<div class="isub">${esc(a.edid)} · ${a.formid}</div>` +
     `<label><span class="k">Variant</span><select id="itemVariant"><option value="">default (addon ${a.default_addon_index})</option>` +
     a.variants.map(v => `<option value="${v.formid}" ${v.formid === state.itemVariant ? 'selected' : ''}>${esc(v.name || v.edid)}` +
@@ -1548,6 +1558,30 @@ document.addEventListener('contextmenu', (e) => {
 });
 cv.addEventListener('wheel', closeCtxMenu, { passive: true });
 cv.addEventListener('pointerup', () => drag = null);
+// resting the mouse on a placed object of a cell names it in a small tip (EditorID · record type · reference FormID, then
+// its file). The pick reads back from the GPU, so it runs once the mouse has rested 110 ms, never on every move
+const hoverTip = document.createElement('div');
+hoverTip.className = 'hovertip'; hoverTip.hidden = true;
+document.body.append(hoverTip);
+let hoverTimer = 0;
+function hideHoverTip() { clearTimeout(hoverTimer); hoverTip.hidden = true; }
+cv.addEventListener('pointermove', e => {
+  hideHoverTip();
+  if (e.buttons || !cells.info || game.on || gizmo.hover) return;
+  hoverTimer = setTimeout(() => {
+    const r = cv.getBoundingClientRect();
+    let hit = null;
+    try { hit = R.pick(e.clientX - r.left, e.clientY - r.top); } catch (err) { return; }
+    const it = hit?.kind === 'cell' ? hit.tpl.items?.[hit.index] : null;
+    if (!it) return;
+    hoverTip.textContent = [it.edid, it.type, it.ref].filter(Boolean).join(' · ') + '\n' + (it.model || '').split('\\').pop();
+    hoverTip.style.left = e.clientX + 14 + 'px'; hoverTip.style.top = e.clientY + 16 + 'px';
+    hoverTip.hidden = false;
+  }, 110);
+});
+cv.addEventListener('pointerleave', hideHoverTip);
+cv.addEventListener('pointerdown', hideHoverTip);
+cv.addEventListener('wheel', hideHoverTip, { passive: true });
 cv.addEventListener('pointermove', e => {
   if (drag && drag.gizmo) { const [x, y] = viewXY(e); gizmo.move(x, y, e.ctrlKey); return; }
   if (!drag) {                                   // hovering: light the gizmo handle under the cursor

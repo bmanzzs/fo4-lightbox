@@ -290,8 +290,8 @@ uniform sampler2D uDiffuse, uNormalTex, uSpecTex, uGlowTex, uPalette;   // diffu
 uniform samplerCube uEnvTex;
 // placed lights (RGBA32F, 1024 wide): 5 texels per light (xyz + radius, negative for a spotlight | colour +
 // specular 0/1 | attenuation + ambient only 0/1 | spot direction + cos of half the FOV | cone falloff exponent,
-// shadow-casting spotlight 0/1, shadow slot or -1), then one texel per cluster (first index, count), then the light
-// indices, 4 per texel
+// shadow-casting spotlight 0/1, shadow slot or -1, shading mode bits: 1 attenuation only, 2 ignore roughness,
+// 4 no rim), then one texel per cluster (first index, count), then the light indices, 4 per texel
 uniform highp sampler2D uLightGrid;
 vec4 lightTexel(int t) { return texelFetch(uLightGrid, ivec2(t & 1023, t >> 10), 0); }
 uniform sampler2D uAO;           // screen-space ambient occlusion of this frame (SAO_FS), one texel per pixel
@@ -464,20 +464,22 @@ void main() {
       vec4 lcol = lightTexel(li + 1), latt = lightTexel(li + 2);
       // a directional light behind the surface adds exactly 0 (diffuse and sheen carry max(clp, 0) / sat(clp), the
       // specular needs nlp > 0): skip its attenuation, cone and shadow taps. Same for att == 0 below
-      if (latt.w <= 0.5 && clp <= 0.0) continue;
-      float att = pow(1.0 - sat(latt.x + latt.y * pow(d / Rl, latt.z)), 2.2);
       vec4 lx = lightTexel(li + 4);
+      int mode = int(lx.w + 0.5);                         // LIGH shading switches (world.js)
+      bool fill = latt.w > 0.5 || (mode & 1) != 0;        // Ambient Only / Attenuation Only: no direction
+      if (!fill && clp <= 0.0) continue;
+      float att = pow(1.0 - sat(latt.x + latt.y * pow(d / Rl, latt.z)), 2.2);
       if (lpos.w < 0.0) att *= spotCone(lightTexel(li + 3), -Lp, lx);     // spotlight (negative radius)
       if (att <= 0.0) continue;
 #if LIGHT_SHADOWS
       if (lx.z > -0.5 && att > 1e-3) att *= lightShadow(int(lx.z + 0.5), -dl, d);
 #endif
-      if (latt.w > 0.5) { Epts += lcol.rgb * att; continue; }        // Ambient Only: fill light, no direction
+      if (fill) { Epts += lcol.rgb * att; continue; }      // fill light: no direction, no specular
       float nlp = sat(clp);
       float Pp = max(0.0, dot(V - cv * N, Lp - clp * N));
       float Qp = sqrt(sat((1.0 - cv * cv) * (1.0 - clp * clp))) / max(max(cv, clp), 1e-4);
-      float sheenP = r * sat(dot(V, -Lp)) * pow(max(1.0 - NV, 0.0), 0.01) * nlp;
-      Epts += lcol.rgb * att * (max(clp, 0.0) * (A + B * Pp * Qp) + sheenP);
+      float sheenP = (mode & 6) != 0 ? 0.0 : r * sat(dot(V, -Lp)) * pow(max(1.0 - NV, 0.0), 0.01) * nlp;
+      Epts += lcol.rgb * att * (max(clp, 0.0) * ((mode & 2) != 0 ? 1.0 : A + B * Pp * Qp) + sheenP);
       if (lcol.w * k * nlp <= 0.0) continue;                         // Non Specular light, or no specular here
       vec3 Hp = normalize(V + Lp);
       float NHp = sat(dot(N, Hp)), VHp = sat(dot(V, Hp));

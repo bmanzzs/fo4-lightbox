@@ -2893,7 +2893,7 @@ export class Renderer {
     if (taa) gl.drawBuffers(both);
     // a backdrop: the sky and the floor are drawn (exposure and light stay those of the scene) but leave alpha at 0,
     // so TONEMAP_FS can put the backdrop there
-    const bd = !!this.settings.backdrop;
+    const bd = !!(this.settings.backdrop || this.env.voidColor);     // (voidColor: an interior's dark surround)
     if (bd) gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     if (bd) gl.clearColor(0, 0, 0, 1);
@@ -3111,7 +3111,7 @@ export class Renderer {
     this.u1i(t, 'uShowBloom', st.showBloom);
     // a backdrop (NifSkope black, Outfit Studio grey) behind the models, with NifSkope's grid and corner axes: the
     // coverage is this frame's resolved alpha (also under TAA, whose output keeps its history's age there)
-    const bdc = st.backdrop;
+    const bdc = st.backdrop || env.voidColor, grid = st.grid && !!st.backdrop;   // (an interior's surround: no grid)
     this.bindUnit(5, this.hdr.tex);
     this.u4f(t, 'uBackdrop', bdc ? [bdc[0], bdc[1], bdc[2], 1] : [0, 0, 0, 0]);
     if (bdc) {
@@ -3119,8 +3119,8 @@ export class Renderer {
       this.um4(t, 'uInvVP', mat4.invert(mat4.mul(L.proj, L.view)));
       this.u3f(t, 'uEye', this.eye);
       this.um4(t, 'uView', L.view);
-      this.u4f(t, 'uGrid', [st.grid ? 1 : 0, gz, 1024, 0]);
-      this.u4f(t, 'uAxes', [st.grid ? 1 : 0, Math.min(w / 10, 125), 0, 0]);
+      this.u4f(t, 'uGrid', [grid ? 1 : 0, gz, 1024, 0]);
+      this.u4f(t, 'uAxes', [grid ? 1 : 0, Math.min(w / 10, 125), 0, 0]);
     }
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     if (this.selection || this.collisionLines) {
@@ -3511,12 +3511,13 @@ export class Renderer {
     if (G.data.length < rows * W * 4) G.data = new Float32Array(rows * W * 4);
     const D = G.data;
     for (let i = 0; i < n; i++) {               // 5 texels: xyz radius | colour, specular | attenuation, ambient only | spot
-      const l = vis[i], o = i * 20, dir = l.dir || [0, 0, -1];   // | cone falloff exponent, shadow spotlight, shadow slot
+      const l = vis[i], o = i * 20, dir = l.dir || [0, 0, -1];   // | cone falloff exponent, shadow spotlight, shadow slot,
+                                                                 // shading mode bits (world.js)
       D[o] = l.pos[0]; D[o + 1] = l.pos[1]; D[o + 2] = l.pos[2]; D[o + 3] = (l.cone ?? -2) > -1.5 ? -l.radius : l.radius;
       D[o + 4] = l.color[0]; D[o + 5] = l.color[1]; D[o + 6] = l.color[2]; D[o + 7] = l.spec ?? 1;
       D[o + 8] = l.att[0]; D[o + 9] = l.att[1]; D[o + 10] = l.att[2]; D[o + 11] = l.ambient || 0;
       D[o + 12] = dir[0]; D[o + 13] = dir[1]; D[o + 14] = dir[2]; D[o + 15] = l.cone ?? -2;
-      D[o + 16] = l.falloff ?? 1; D[o + 17] = l.shadow === 1 ? 1 : 0; D[o + 18] = l._lsSlot ?? -1; D[o + 19] = 0;
+      D[o + 16] = l.falloff ?? 1; D[o + 17] = l.shadow === 1 ? 1 : 0; D[o + 18] = l._lsSlot ?? -1; D[o + 19] = l.mode || 0;
     }
     const cursor = new Uint32Array(NC);
     for (let c = 0, acc = 0; c < NC; c++) {

@@ -45,7 +45,14 @@ railway gamma shoulder mounted digging dig sitting leaning kneel kneeling sleep 
 barrel fatman baseball pool cue ripper sledge sledgehammer board lead wrench machete knuckles boxing deliverer flamer
 cryolator alien blaster broadsider harpoon radium lever action handmade revolver submachine assault gauss syringer couch
 barstool stool counter workbench cooking station chemistry injured paired dynamic grip grips straight fired machinegun
-missilelauncher queen king hunter behemoth hound vicious mole rat yao guai crow`;
+missilelauncher queen king hunter behemoth hound vicious mole rat yao guai crow
+editor dummy small town player clean lunchbox kids federalist floor ceil dmg brass plaque elevator button roller coaster
+soda mixing auto fixtures modern domestic kiddie kingdom souvenirs dest statue bits circuit breaker duffle attach ref uss
+constitution grave stones traffic condensor memory lounge work stations load screen art foodware vases pots bunker hill
+loose boards audio equipment panels sports objects glowing sea alien data stream blood worm sidewalk hanging galactic
+zone liberty prime switch latch generic emergency anim card reader basketball hoop lobster float kitchen bathroom
+bedroom tech appliances electrical shelving rubble barrier barriers sandbag sandbags planks tiles stair stairs railing
+catwalk scaffold pallet pallets barrel barrels vent vents duct ducts valve mailbox newspaper books magazines bones bodies`;
 const VOCAB = new Set(WORDS.split(/\s+/).filter(Boolean));
 const MAXW = Math.max(...[...VOCAB].map(w => w.length));
 const DROP = new Set(['meshes', 'nif', 'characterassets', 'assets', 'mesh', 'meshs', 'parts']);

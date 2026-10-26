@@ -542,7 +542,7 @@ def build_launcher(out_exe, version):
                             '/win32manifest:' + os.path.join(src, 'app.manifest'),
                             '/resource:' + os.path.join(src, 'lightbox.ico') + ',lightbox.ico',
                             '/resource:' + os.path.join(src, 'splash.png') + ',splash.png',
-                            '/r:System.Windows.Forms.dll', '/r:System.Drawing.dll', '/out:' + out_exe,
+                            '/r:System.Windows.Forms.dll', '/r:System.Drawing.dll', '/r:System.Management.dll', '/out:' + out_exe,
                             os.path.join(src, 'Launcher.cs'), info], capture_output=True, text=True)
     finally:
         os.remove(info)
